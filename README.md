@@ -8,7 +8,7 @@ A blockchain-backed property registration and management system built with **Fas
 
 ### 🔗 Blockchain Ledger
 
-- Custom SHA-256 blockchain with encrypted SQLite persistence
+- Custom blockchain with encrypted SQLite persistence(decentralised deployment will use dockerized postgres)
 - Property **registration**, **transfer** (sale), and **inheritance**
 - Immutable ownership history with full audit trail
 - Automatic stamp duty and registration fee calculation
@@ -136,7 +136,7 @@ The app starts at **http://localhost:8000**.
 On first startup, a default admin account is created:
 
 - **Username:** `admin`
-- **Password:** `admin`
+- **Password:** `admin123`
 
 > ⚠️ Change the default password immediately after first login.
 
