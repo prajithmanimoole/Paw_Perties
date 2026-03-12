@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}All Properties &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">All Properties</h1>
+  <a href="/register" class="btn btn-primary">+ Register New</a>
+</div>
+
+{% if properties %}
+<p class="text-muted mb-md">
+  {{ properties|length }} propert{{ "y" if properties|length == 1 else "ies" }}
+  registered.
+</p>
+{% include "partials/properties_list.html" %}
+{% else %}
+<div class="empty-state">
+  <p>No properties have been registered yet.</p>
+  <a href="/register" class="btn btn-primary">Register First Property</a>
+</div>
+{% endif %}
+{% endblock %}

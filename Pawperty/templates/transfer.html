@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Transfer Property &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Transfer Property (Sale)</h1>
+</div>
+
+{% if prefill_state %}
+<div class="info-banner">
+  <strong>Current Owner:</strong> {{ prefill_state.owner }} &bull;
+  <strong>Address:</strong> {{ prefill_state.address }} &bull;
+  <strong>Value:</strong> ₹{{ "{:,.0f}".format(prefill_state.value) }}
+</div>
+{% endif %}
+
+<div class="form-page" x-data="{ loading: false }">
+  <form
+    action="/transfer"
+    method="post"
+    class="property-form"
+    @submit="loading = true"
+  >
+    <div class="form-section">
+      <h2 class="form-section-title">Property</h2>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="property_key"
+            >Property Key <span class="required">*</span></label
+          >
+          <input
+            id="property_key"
+            name="property_key"
+            type="text"
+            class="form-input"
+            value="{{ prefill_key or form_data.property_key | default('') }}"
+            {%
+            if
+            prefill_key
+            %}readonly{%
+            endif
+            %}
+            placeholder="e.g. PROP-2024-001"
+            required
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h2 class="form-section-title">New Owner</h2>
+      <div class="form-grid">
+        <div class="form-group form-col-2" x-data>
+          <label class="form-label" for="lookup_custid"
+            >Lookup by Customer ID <span class="text-muted text-sm">(optional)</span></label
+          >
+          <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+            <input
+              id="lookup_custid"
+              type="text"
+              class="form-input"
+              placeholder="e.g. CUST-A1B2C3D4"
+              style="text-transform: uppercase; flex: 1;"
+              hx-get="/htmx/lookup-custid"
+              hx-trigger="blur"
+              hx-target="#custid-result"
+              hx-vals="js:{customer_key: document.getElementById('lookup_custid').value, target: 'transfer'}"
+            />
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost"
+              style="margin-top: 0.15rem;"
+              @click="
+                document.getElementById('lookup_custid').value = '';
+                document.getElementById('custid-result').innerHTML = '';
+                ['new_owner_name','new_owner_aadhar','new_owner_pan'].forEach(id => {
+                  const el = document.getElementById(id);
+                  el.value = '';
+                  el.removeAttribute('readonly');
+                });
+              "
+            >Clear</button>
+          </div>
+          <div id="custid-result" class="field-feedback"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="new_owner_name"
+            >New Owner Name <span class="required">*</span></label
+          >
+          <input
+            id="new_owner_name"
+            name="new_owner_name"
+            type="text"
+            class="form-input"
+            value="{{ form_data.new_owner_name | default('') }}"
+            placeholder="Full legal name"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="new_owner_aadhar"
+            >Aadhar Number <span class="required">*</span></label
+          >
+          <input
+            id="new_owner_aadhar"
+            name="new_owner_aadhar"
+            type="text"
+            class="form-input"
+            value="{{ form_data.new_owner_aadhar | default('') }}"
+            placeholder="12-digit Aadhar"
+            maxlength="12"
+            hx-post="/htmx/validate-aadhar"
+            hx-trigger="blur"
+            hx-target="#aadhar-feedback"
+            hx-vals="js:{aadhar_no: document.getElementById('new_owner_aadhar').value, owner_name: document.getElementById('new_owner_name').value}"
+            required
+          />
+          <div id="aadhar-feedback" class="field-feedback"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="new_owner_pan"
+            >PAN Number <span class="required">*</span></label
+          >
+          <input
+            id="new_owner_pan"
+            name="new_owner_pan"
+            type="text"
+            class="form-input"
+            value="{{ form_data.new_owner_pan | default('') }}"
+            placeholder="e.g. ABCDE1234F"
+            maxlength="10"
+            hx-post="/htmx/validate-pan"
+            hx-trigger="blur"
+            hx-target="#pan-feedback"
+            hx-vals="js:{pan_no: document.getElementById('new_owner_pan').value, owner_name: document.getElementById('new_owner_name').value}"
+            required
+          />
+          <div id="pan-feedback" class="field-feedback"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h2 class="form-section-title">Transaction</h2>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="transfer_value"
+            >Transfer Value (₹) <span class="required">*</span></label
+          >
+          <input
+            id="transfer_value"
+            name="transfer_value"
+            type="number"
+            step="1"
+            min="1"
+            class="form-input"
+            value="{{ form_data.transfer_value | default('') }}"
+            placeholder="Sale amount in INR"
+            hx-get="/htmx/stamp-duty"
+            hx-trigger="input delay:600ms"
+            hx-target="#stamp-duty-preview"
+            hx-vals="js:{value: document.getElementById('transfer_value').value}"
+            hx-indicator="#duty-spinner"
+            required
+          />
+          <span id="duty-spinner" class="htmx-indicator spinner-sm"
+            >Calculating…</span
+          >
+        </div>
+
+        <!-- Live stamp-duty preview -->
+        <div id="stamp-duty-preview" class="form-col-2"></div>
+
+        <div class="form-group">
+          <label class="form-label" for="stamp_duty_paid"
+            >Custom Stamp Duty (₹)</label
+          >
+          <input
+            id="stamp_duty_paid"
+            name="stamp_duty_paid"
+            type="number"
+            step="0.01"
+            min="0"
+            class="form-input"
+            value="{{ form_data.stamp_duty_paid | default('') }}"
+            placeholder="Leave blank to use calculated default"
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="registration_fee"
+            >Custom Registration Fee (₹)</label
+          >
+          <input
+            id="registration_fee"
+            name="registration_fee"
+            type="number"
+            step="0.01"
+            min="0"
+            class="form-input"
+            value="{{ form_data.registration_fee | default('') }}"
+            placeholder="Leave blank to use 5% default"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <a href="/properties" class="btn btn-ghost">Cancel</a>
+      <button
+        type="submit"
+        class="btn btn-primary"
+        :disabled="loading"
+        x-text="loading ? 'Transferring…' : 'Transfer Property'"
+      ></button>
+    </div>
+  </form>
+</div>
+{% endblock %}

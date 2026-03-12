@@ -1,0 +1,19 @@
+<div class="custid-result">
+  {% if error %}
+  <div class="feedback feedback-error">✗ {{ error }}</div>
+  {% elif owner %}
+  <div class="feedback feedback-ok">✓ Found: <strong>{{ owner.name }}</strong></div>
+  <div class="custid-details">
+    <span>Aadhar: {{ owner.aadhar[:4] }}****{{ owner.aadhar[-4:] }}</span>
+    <span>PAN: {{ owner.pan[:5] }}****</span>
+  </div>
+  <script>
+    document.getElementById('{{ name_field }}').value = '{{ owner.name }}';
+    document.getElementById('{{ aadhar_field }}').value = '{{ owner.aadhar }}';
+    document.getElementById('{{ pan_field }}').value = '{{ owner.pan }}';
+    document.getElementById('{{ name_field }}').setAttribute('readonly', true);
+    document.getElementById('{{ aadhar_field }}').setAttribute('readonly', true);
+    document.getElementById('{{ pan_field }}').setAttribute('readonly', true);
+  </script>
+  {% endif %}
+</div>
