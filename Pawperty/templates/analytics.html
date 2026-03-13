@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import house, chain %}
+{% block title %}Analytics &mdash; Pawperty{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Analytics</h1>
+    <p class="page-subtitle">
+      <span class="key-badge">{{ total_properties }}</span> properties across
+      <span class="key-badge">{{ total_districts }}</span> districts
+    </p>
+  </div>
+</div>
+
+<!-- Tab switcher -->
+<div x-data="{ tab: 'activity' }">
+  <div class="analytics-tabs">
+    <button class="analytics-tab" :class="{ 'analytics-tab-active': tab === 'activity' }" @click="tab = 'activity'" type="button">
+      📊 Activity
+    </button>
+    <button class="analytics-tab" :class="{ 'analytics-tab-active': tab === 'heatmap' }" @click="tab = 'heatmap'" type="button">
+      🔥 Heatmap
+    </button>
+  </div>
+
+  <!-- Activity Chart Tab -->
+  <div x-show="tab === 'activity'" class="analytics-panel">
+    <div class="analytics-card">
+      <h2 class="section-title">Transaction Activity by Month</h2>
+      <p class="text-muted text-sm" style="margin-bottom: 1rem;">
+        Combined view of registrations, transfers, and inheritances over time.
+      </p>
+      <div class="chart-container">
+        <canvas id="activityChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Heatmap Tab -->
+  <div x-show="tab === 'heatmap'" class="analytics-panel" x-cloak>
+    <div class="analytics-card">
+      <h2 class="section-title">Property Value by District</h2>
+      <p class="text-muted text-sm" style="margin-bottom: 1rem;">
+        Districts sorted by total property value. Color intensity shows concentration.
+      </p>
+      {% if heatmap %}
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>District</th>
+              <th class="text-center">Properties</th>
+              <th class="text-center">Total Value (₹)</th>
+              <th class="text-center">Avg Value (₹)</th>
+              <th>Intensity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% set max_val = heatmap[0].total_value if heatmap else 1 %}
+            {% for row in heatmap %}
+            {% set pct = (row.total_value / max_val * 100) | int if max_val > 0 else 0 %}
+            <tr>
+              <td class="text-muted">{{ loop.index }}</td>
+              <td><strong>{{ row.district }}</strong></td>
+              <td class="text-center">{{ row.count }}</td>
+              <td class="text-center">{{ "{:,.0f}".format(row.total_value) }}</td>
+              <td class="text-center">{{ "{:,.0f}".format(row.avg_value) }}</td>
+              <td>
+                <div class="heatmap-bar-wrapper">
+                  <div class="heatmap-bar"
+                       style="width: {{ pct }}%;
+                              background: {% if pct > 66 %}var(--color-pink){% elif pct > 33 %}var(--color-yellow){% else %}var(--color-lime){% endif %};">
+                  </div>
+                  <span class="heatmap-pct">{{ pct }}%</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <p>No district data available. Register some properties first.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const timeline = {{ timeline_json | safe }};
+
+  // Aggregate totals for frequency chart
+  const totals = timeline.reduce((acc, t) => {
+    acc.registrations += t.registrations;
+    acc.transfers += t.transfers;
+    acc.inheritances += t.inheritances;
+    return acc;
+  }, { registrations: 0, transfers: 0, inheritances: 0 });
+
+  const ctx = document.getElementById('activityChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: ['Registrations', 'Transfers', 'Inheritances'],
+      datasets: [{
+        label: 'Transaction Frequency',
+        data: [totals.registrations, totals.transfers, totals.inheritances],
+        borderColor: '#111',
+        backgroundColor: 'rgba(206, 250, 5, 0.2)',
+        borderWidth: 3,
+        pointBackgroundColor: ['#CEFA05', '#3B82F6', '#F472B6'],
+        pointBorderColor: '#111',
+        pointBorderWidth: 3,
+        pointRadius: 8,
+        pointHoverRadius: 11,
+        tension: 0,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          titleFont: { family: "'Space Grotesk', sans-serif", weight: '700' },
+          bodyFont: { family: "'JetBrains Mono', monospace" },
+          backgroundColor: '#111',
+          borderColor: '#111',
+          borderWidth: 2,
+          padding: 12,
+          callbacks: {
+            label: function(ctx) {
+              return `  ${ctx.parsed.y} transactions`;
+            }
+          }
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { font: { family: "'Space Grotesk', sans-serif", size: 13, weight: '700' }, color: '#111' },
+          border: { color: '#111', width: 2 },
+        },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            stepSize: 1,
+            font: { family: "'JetBrains Mono', monospace", size: 11, weight: '700' },
+            color: '#111',
+          },
+          grid: { color: 'rgba(0,0,0,0.07)' },
+          border: { color: '#111', width: 2 },
+        },
+      },
+    },
+  });
+});
+</script>
+{% endblock %}

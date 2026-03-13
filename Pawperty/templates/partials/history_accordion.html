@@ -1,0 +1,76 @@
+{% from "partials/icons.html" import gear, house, transfer, scroll %}
+{% if history %}
+<div class="history-timeline">
+  {% for record in history %}
+  <div class="history-item history-{{ record.data.type }}">
+    <div class="history-icon">
+      {% if record.data.type == 'genesis' %}{{ gear(20) }}{% elif record.data.type ==
+      'registration' %}{{ house(20) }}{% elif record.data.type == 'transfer' %}{{ transfer(20) }}{% else
+      %}{{ scroll(20) }}{% endif %}
+    </div>
+    <div class="history-content">
+      <div class="history-header">
+        <span class="type-badge type-{{ record.data.type }}"
+          >{{ record.data.type | upper }}</span
+        >
+        <span class="history-timestamp text-muted"
+          >{{ record.timestamp[:19].replace('T', ' ') }}</span
+        >
+        <span class="history-block text-muted">Block #{{ record.index }}</span>
+      </div>
+
+      {% if record.data.type == 'registration' %}
+      <div class="history-body">
+        <p><strong>Registered by:</strong> {{ record.data.owner }}</p>
+        <p><strong>Address:</strong> {{ record.data.address }}</p>
+        <p><strong>Survey No:</strong> {{ record.data.survey_no }}</p>
+        <p>
+          <strong>Value:</strong> ₹{{ "{:,.0f}".format(record.data.value) }}
+        </p>
+      </div>
+
+      {% elif record.data.type in ('transfer', 'inheritance') %}
+      <div class="history-body">
+        <p>
+          <strong>{{ record.data.previous_owner }}</strong>
+          &rarr;
+          <strong>{{ record.data.new_owner }}</strong>
+        </p>
+        <p><strong>Reason:</strong> {{ record.data.transfer_reason }}</p>
+        {% if record.data.transfer_value %}
+        <p>
+          <strong>Transfer Value:</strong> ₹{{
+          "{:,.0f}".format(record.data.transfer_value) }}
+        </p>
+        <p>
+          <strong>Stamp Duty:</strong> ₹{{
+          "{:,.0f}".format(record.data.stamp_duty_paid) }} &bull;
+          <strong>Reg Fee:</strong> ₹{{
+          "{:,.0f}".format(record.data.registration_fee) }}
+        </p>
+        {% endif %}
+        {% if record.data.additional_info.relationship %}
+        <p>
+          <strong>Relationship:</strong> {{
+          record.data.additional_info.relationship }}
+        </p>
+        {% endif %}
+        {% if record.data.additional_info.legal_heir_certificate_no %}
+        <p>
+          <strong>Heir Certificate No.:</strong> {{
+          record.data.additional_info.legal_heir_certificate_no }}
+        </p>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="history-hash text-muted">
+        <code>{{ record.hash[:20] }}…</code>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">No history records found.</p>
+{% endif %}

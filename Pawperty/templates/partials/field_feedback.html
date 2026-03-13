@@ -1,0 +1,6 @@
+{% from 'partials/icons.html' import check, xmark %}
+{% if error %}
+<span class="feedback feedback-error">{{ xmark(16, 'feedback-icon') }} {{ error }}</span>
+{% elif value %}
+<span class="feedback feedback-ok">{{ check(16, 'feedback-icon') }} Valid</span>
+{% endif %}

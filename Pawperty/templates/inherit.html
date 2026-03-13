@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Inherit Property &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Inherit Property</h1>
+</div>
+
+{% if prefill_state %}
+<div class="info-banner">
+  <strong>Current Owner:</strong> {{ prefill_state.owner }} &bull;
+  <strong>Address:</strong> {{ prefill_state.address }}
+</div>
+{% endif %}
+
+<div class="form-page" x-data="{ loading: false }">
+  <form action="/inherit" method="post" class="property-form" @submit="loading = true">
+    <div class="form-section">
+      <h2 class="form-section-title">Property</h2>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="property_key">Property Key <span class="required">*</span></label>
+          <input id="property_key" name="property_key" type="text" class="form-input"
+                 value="{{ prefill_key or form_data.property_key | default('') }}"
+                 {% if prefill_key %}readonly{% endif %}
+                 placeholder="e.g. PROP-2024-001" required />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h2 class="form-section-title">Heir Details</h2>
+      <div class="form-grid">
+        <div class="form-group form-col-2" x-data>
+          <label class="form-label" for="lookup_custid"
+            >Lookup by Customer ID <span class="text-muted text-sm">(optional)</span></label
+          >
+          <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+            <input
+              id="lookup_custid"
+              type="text"
+              class="form-input"
+              placeholder="e.g. CUST-A1B2C3D4"
+              style="text-transform: uppercase; flex: 1;"
+              hx-get="/htmx/lookup-custid"
+              hx-trigger="blur"
+              hx-target="#custid-result"
+              hx-vals="js:{customer_key: document.getElementById('lookup_custid').value, target: 'inherit'}"
+            />
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost"
+              style="margin-top: 0.15rem;"
+              @click="
+                document.getElementById('lookup_custid').value = '';
+                document.getElementById('custid-result').innerHTML = '';
+                ['heir_name','heir_aadhar','heir_pan'].forEach(id => {
+                  const el = document.getElementById(id);
+                  el.value = '';
+                  el.removeAttribute('readonly');
+                });
+              "
+            >Clear</button>
+          </div>
+          <div id="custid-result" class="field-feedback"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="heir_name">Heir Name <span class="required">*</span></label>
+          <input id="heir_name" name="heir_name" type="text" class="form-input"
+                 value="{{ form_data.heir_name | default('') }}" placeholder="Full legal name of heir" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="heir_aadhar">Heir Aadhar Number <span class="required">*</span></label>
+          <input id="heir_aadhar" name="heir_aadhar" type="text" class="form-input"
+                 value="{{ form_data.heir_aadhar | default('') }}" placeholder="12-digit Aadhar" maxlength="12"
+                 hx-post="/htmx/validate-aadhar" hx-trigger="blur" hx-target="#aadhar-feedback"
+                 hx-vals='js:{aadhar_no: document.getElementById("heir_aadhar").value, owner_name: document.getElementById("heir_name").value}'
+                 required />
+          <div id="aadhar-feedback" class="field-feedback"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="heir_pan">Heir PAN Number <span class="required">*</span></label>
+          <input id="heir_pan" name="heir_pan" type="text" class="form-input"
+                 value="{{ form_data.heir_pan | default('') }}" placeholder="e.g. ABCDE1234F" maxlength="10"
+                 hx-post="/htmx/validate-pan" hx-trigger="blur" hx-target="#pan-feedback"
+                 hx-vals='js:{pan_no: document.getElementById("heir_pan").value, owner_name: document.getElementById("heir_name").value}'
+                 required />
+          <div id="pan-feedback" class="field-feedback"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="relationship">Relationship to Previous Owner</label>
+          <select id="relationship" name="relationship" class="form-input form-select">
+            <option value="">— Select —</option>
+            <option value="son" {{ 'selected' if form_data.relationship == 'son' }}>Son</option>
+            <option value="daughter" {{ 'selected' if form_data.relationship == 'daughter' }}>Daughter</option>
+            <option value="spouse" {{ 'selected' if form_data.relationship == 'spouse' }}>Spouse</option>
+            <option value="father" {{ 'selected' if form_data.relationship == 'father' }}>Father</option>
+            <option value="mother" {{ 'selected' if form_data.relationship == 'mother' }}>Mother</option>
+            <option value="sibling" {{ 'selected' if form_data.relationship == 'sibling' }}>Sibling</option>
+            <option value="legal_heir" {{ 'selected' if form_data.relationship == 'legal_heir' }}>Legal Heir (Court Order)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="legal_heir_certificate_no">Legal Heir Certificate No.</label>
+          <input id="legal_heir_certificate_no" name="legal_heir_certificate_no" type="text" class="form-input"
+                 value="{{ form_data.legal_heir_certificate_no | default('') }}"
+                 placeholder="Certificate number if applicable" />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <a href="/properties" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-primary" :disabled="loading"
+              x-text="loading ? 'Processing…' : 'Complete Inheritance'"></button>
+    </div>
+  </form>
+</div>
+{% endblock %}

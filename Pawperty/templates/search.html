@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Search Properties &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Search Properties</h1>
+</div>
+
+<div class="search-bar">
+  <input type="search" name="q" class="form-input search-input"
+         placeholder="Search by owner name, CUST-ID, property key, Aadhar, PAN, address, survey no, district…"
+         autofocus
+         hx-get="/htmx/search"
+         hx-trigger="input delay:350ms, search"
+         hx-target="#search-results"
+         hx-swap="innerHTML"
+         hx-indicator="#search-spinner" />
+  <span id="search-spinner" class="htmx-indicator spinner-sm">Searching…</span>
+</div>
+
+<div id="search-results">
+  <p class="search-placeholder text-muted">Start typing to search across all fields — owner, property key, customer ID, Aadhar, PAN, address, survey number, district.</p>
+</div>
+{% endblock %}
