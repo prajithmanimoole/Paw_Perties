@@ -10,13 +10,20 @@ citizen : view own properties and ownership history (read-only)
 from __future__ import annotations
 
 import os
+import json
+import uuid
+import csv
+import io
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+import uvicorn
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -36,7 +43,7 @@ from auth import (
 )
 from Blockchain import Owner, PropertyBlockchain
 from database import Base, SessionLocal, engine, get_db
-from models import Citizen, User
+from models import Citizen, CorrectionAuditLog, CorrectionRequest, User, UserBlockActivity
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +113,10 @@ templates = Jinja2Templates(directory="templates")
 @app.exception_handler(NotAuthenticatedException)
 async def unauthenticated_handler(request: Request, exc: NotAuthenticatedException):
     """Redirect any unauthenticated request to the login page."""
+    if request.headers.get("HX-Request") == "true":
+        response = HTMLResponse(content="", status_code=200)
+        response.headers["HX-Redirect"] = "/login"
+        return response
     return RedirectResponse(url="/login", status_code=302)
 
 
@@ -130,6 +141,249 @@ def _flash(request: Request, message: str, category: str = "success") -> None:
 
 def _pop_flash(request: Request) -> Optional[Dict[str, str]]:
     return request.session.pop("flash", None)
+
+
+def _new_correction_request_id() -> str:
+    return f"CR{str(uuid.uuid4()).upper().replace('-', '')[:8]}"
+
+
+def _normalize_correction_payload(
+    ledger: PropertyBlockchain,
+    owner_name: str,
+    aadhar_no: str,
+    pan_no: str,
+    address: str,
+    pincode: str,
+    value: str,
+) -> Dict[str, Any]:
+    clean_owner = owner_name.strip().upper()
+    clean_aadhar = aadhar_no.replace(" ", "").replace("-", "")
+    clean_pan = pan_no.strip().upper()
+    clean_address = address.strip().upper()
+    clean_pincode = pincode.strip().upper()
+
+    if not clean_owner:
+        raise ValueError("Owner name cannot be empty.")
+    if not ledger.validate_aadhar(clean_aadhar):
+        raise ValueError("Aadhar must be exactly 12 digits.")
+    if not ledger.validate_pan(clean_pan):
+        raise ValueError("PAN must be in format ABCDE1234F.")
+
+    corrected_value = float(value)
+    if corrected_value <= 0:
+        raise ValueError("Property value must be a positive number.")
+
+    return {
+        "owner_name": clean_owner,
+        "aadhar_no": clean_aadhar,
+        "pan_no": clean_pan,
+        "address": clean_address,
+        "pincode": clean_pincode,
+        "value": corrected_value,
+    }
+
+
+def _build_requested_corrections(
+    ledger: PropertyBlockchain,
+    selected_fields: List[str],
+    corrected_owner_name: str,
+    corrected_aadhar_no: str,
+    corrected_pan_no: str,
+    corrected_address: str,
+    corrected_pincode: str,
+    corrected_value: str,
+) -> Dict[str, Any]:
+    allowed_fields = {"owner_name", "aadhar_no", "pan_no", "address", "pincode", "value"}
+    requested_fields = {field.strip() for field in selected_fields if field.strip()}
+
+    if not requested_fields:
+        raise ValueError("Select at least one field that needs correction.")
+
+    invalid_fields = requested_fields - allowed_fields
+    if invalid_fields:
+        raise ValueError("Invalid correction field selection.")
+
+    payload: Dict[str, Any] = {}
+
+    if "owner_name" in requested_fields:
+        owner = corrected_owner_name.strip().upper()
+        if not owner:
+            raise ValueError("Correct owner name is required.")
+        payload["owner_name"] = owner
+
+    if "aadhar_no" in requested_fields:
+        aadhar = corrected_aadhar_no.replace(" ", "").replace("-", "")
+        if not ledger.validate_aadhar(aadhar):
+            raise ValueError("Correct Aadhaar must be exactly 12 digits.")
+        payload["aadhar_no"] = aadhar
+
+    if "pan_no" in requested_fields:
+        pan = corrected_pan_no.strip().upper()
+        if not ledger.validate_pan(pan):
+            raise ValueError("Correct PAN must be in format ABCDE1234F.")
+        payload["pan_no"] = pan
+
+    if "address" in requested_fields:
+        address = corrected_address.strip().upper()
+        if not address:
+            raise ValueError("Correct address is required.")
+        payload["address"] = address
+
+    if "pincode" in requested_fields:
+        pincode = corrected_pincode.strip().upper()
+        if not pincode:
+            raise ValueError("Correct pincode is required.")
+        payload["pincode"] = pincode
+
+    if "value" in requested_fields:
+        try:
+            value = float(corrected_value)
+        except ValueError as exc:
+            raise ValueError("Correct value must be a valid number.") from exc
+        if value <= 0:
+            raise ValueError("Correct value must be greater than zero.")
+        payload["value"] = value
+
+    return payload
+
+
+def _latest_valid_transaction_id(ledger: PropertyBlockchain, property_key: str) -> str:
+    """Return the latest VALID transaction id for a property."""
+    history = ledger.get_property_history(property_key)
+    for record in reversed(history):
+        if record.get("status") == ledger.STATUS_VALID:
+            return str(record.get("transaction_id", "")).strip().upper()
+    raise ValueError("No VALID transaction found for this property.")
+
+
+def _infer_selected_fields(
+    selected_fields: List[str],
+    corrected_owner_name: str,
+    corrected_aadhar_no: str,
+    corrected_pan_no: str,
+    corrected_address: str,
+    corrected_pincode: str,
+    corrected_value: str,
+) -> List[str]:
+    """Infer correction fields from non-empty corrected inputs when checkboxes are missed."""
+    normalized = [field.strip() for field in selected_fields if field and field.strip()]
+    if normalized:
+        return normalized
+
+    inferred: List[str] = []
+    if corrected_owner_name.strip():
+        inferred.append("owner_name")
+    if corrected_aadhar_no.replace(" ", "").replace("-", ""):
+        inferred.append("aadhar_no")
+    if corrected_pan_no.strip():
+        inferred.append("pan_no")
+    if corrected_address.strip():
+        inferred.append("address")
+    if corrected_pincode.strip():
+        inferred.append("pincode")
+    if corrected_value.strip():
+        inferred.append("value")
+
+    return inferred
+
+
+def _append_correction_audit(
+    db: Session,
+    correction_request_id: str,
+    actor: User,
+    action_type: str,
+    comments: str = "",
+) -> None:
+    db.add(
+        CorrectionAuditLog(
+            correction_request_id=correction_request_id,
+            actor_user_id=actor.id,
+            actor_username=actor.username,
+            actor_role=actor.role,
+            action_type=action_type,
+            comments=comments,
+        )
+    )
+
+
+def _record_block_activity(db: Session, actor: User, block: Any, action_type: str) -> None:
+    db.add(
+        UserBlockActivity(
+            user_id=actor.id,
+            username=actor.username,
+            user_role=actor.role,
+            action_type=action_type,
+            property_key=block.property_key,
+            block_index=block.index,
+            transaction_id=block.data.get("transaction_id", ""),
+        )
+    )
+
+
+def _activity_summary_by_user(db: Session) -> Dict[int, int]:
+    rows = (
+        db.query(UserBlockActivity.user_id, func.count(UserBlockActivity.id))
+        .group_by(UserBlockActivity.user_id)
+        .all()
+    )
+    return {user_id: count for user_id, count in rows}
+
+
+def _build_citizen_user_rows(db: Session, ledger: PropertyBlockchain) -> List[Dict[str, Any]]:
+    """Build citizen rows enriched with current/past property ownership counts."""
+    citizens = db.query(Citizen).order_by(Citizen.created_at.asc()).all()
+    rows: List[Dict[str, Any]] = []
+
+    for citizen in citizens:
+        properties = ledger.get_properties_by_customer_key(
+            citizen.customer_key,
+            aadhar_no=citizen.aadhar_no,
+            pan_no=citizen.pan_no,
+            owner_name=citizen.name,
+        )
+        current_props = properties.get("current", [])
+        past_props = properties.get("past", [])
+
+        rows.append(
+            {
+                "id": citizen.id,
+                "name": citizen.name,
+                "customer_key": citizen.customer_key,
+                "aadhar_no": citizen.aadhar_no,
+                "pan_no": citizen.pan_no,
+                "is_active": citizen.is_active,
+                "created_at": citizen.created_at,
+                "current_count": len(current_props),
+                "past_count": len(past_props),
+            }
+        )
+
+    return rows
+
+
+def _serialize_correction_request(req: CorrectionRequest) -> Dict[str, Any]:
+    return {
+        "request_id": req.request_id,
+        "property_key": req.property_key,
+        "original_transaction_id": req.original_transaction_id,
+        "error_description": req.error_description,
+        "corrected_data": json.loads(req.corrected_data_json or "{}"),
+        "supporting_notes": req.supporting_notes,
+        "submitted_officer_name": req.submitted_officer_name,
+        "status": req.status,
+        "created_at": req.created_at,
+        "updated_at": req.updated_at,
+    }
+
+
+def _parse_filter_date(raw_value: str, *, end_of_day: bool = False) -> Optional[datetime]:
+    value = raw_value.strip()
+    if not value:
+        return None
+    parsed = datetime.strptime(value, "%Y-%m-%d")
+    if end_of_day:
+        return parsed + timedelta(days=1)
+    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +564,12 @@ async def citizen_dashboard(
     citizen: Citizen = Depends(require_citizen),
 ):
     ledger = _ledger(request)
-    props = ledger.get_properties_by_customer_key(citizen.customer_key)
+    props = ledger.get_properties_by_customer_key(
+        citizen.customer_key,
+        aadhar_no=citizen.aadhar_no,
+        pan_no=citizen.pan_no,
+        owner_name=citizen.name,
+    )
     flash = _pop_flash(request)
     return templates.TemplateResponse(
         "citizen/dashboard.html",
@@ -338,7 +597,12 @@ async def citizen_property_detail(
         raise HTTPException(status_code=404, detail=f"Property '{key}' not found.")
 
     # Verify citizen has a relationship with this property
-    props = ledger.get_properties_by_customer_key(citizen.customer_key)
+    props = ledger.get_properties_by_customer_key(
+        citizen.customer_key,
+        aadhar_no=citizen.aadhar_no,
+        pan_no=citizen.pan_no,
+        owner_name=citizen.name,
+    )
     all_keys = [p["property_key"] for p in props["current"] + props["past"]]
     if key not in all_keys:
         raise HTTPException(status_code=403, detail="You do not have access to this property.")
@@ -371,6 +635,31 @@ async def dashboard(
     all_props = ledger.get_all_properties()
     recent = sorted(all_props, key=lambda p: p.get("last_updated", ""), reverse=True)[:5]
     flash = _pop_flash(request)
+    recent_staff_work = []
+    work_totals = []
+
+    if user.role == "admin":
+        recent_staff_work = (
+            db.query(UserBlockActivity)
+            .order_by(UserBlockActivity.created_at.desc(), UserBlockActivity.id.desc())
+            .limit(10)
+            .all()
+        )
+        work_totals = (
+            db.query(
+                UserBlockActivity.user_id,
+                UserBlockActivity.username,
+                UserBlockActivity.user_role,
+                func.count(UserBlockActivity.id).label("block_count"),
+            )
+            .group_by(
+                UserBlockActivity.user_id,
+                UserBlockActivity.username,
+                UserBlockActivity.user_role,
+            )
+            .order_by(func.count(UserBlockActivity.id).desc(), UserBlockActivity.username.asc())
+            .all()
+        )
 
     return templates.TemplateResponse(
         "index.html",
@@ -380,6 +669,8 @@ async def dashboard(
             block_count=len(ledger.chain),
             property_count=len(all_props),
             recent_properties=recent,
+            recent_staff_work=recent_staff_work,
+            work_totals=work_totals,
             flash=flash,
         ),
     )
@@ -422,6 +713,57 @@ async def properties_list(
     return templates.TemplateResponse(
         "properties.html", _ctx(request, db, properties=all_props)
     )
+
+
+@app.get("/properties/export.csv")
+@app.get("/properties/export")
+@app.get("/exports/properties-dataset.csv")
+async def properties_dataset_export_csv(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_officer),
+):
+    """Export non-user property dataset fields for analytics/model training."""
+    ledger = _ledger(request)
+    all_props = ledger.get_all_properties()
+
+    output = io.StringIO()
+    fieldnames = [
+        "place",
+        "address",
+        "survey_no",
+        "land_type",
+        "land_area",
+        "village",
+        "taluk",
+        "district",
+        "state",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for prop in all_props:
+        location = prop.get("location", {}) or {}
+        land = prop.get("land_details", {}) or {}
+        writer.writerow(
+            {
+                "place": prop.get("address", ""),
+                "address": prop.get("address", ""),
+                "survey_no": prop.get("survey_no", ""),
+                "land_type": land.get("type", ""),
+                "land_area": land.get("area", ""),
+                "village": location.get("village", ""),
+                "taluk": location.get("taluk", ""),
+                "district": location.get("district", ""),
+                "state": location.get("state", ""),
+            }
+        )
+
+    csv_data = output.getvalue()
+    output.close()
+    filename = f"properties_dataset_{datetime.now().strftime('%Y%m%d')}.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=csv_data, media_type="text/csv", headers=headers)
 
 
 @app.get("/properties/{key}", response_class=HTMLResponse)
@@ -509,6 +851,8 @@ async def register_post(
             land_type=land_type,
             description=description,
         )
+        _record_block_activity(db, user, ledger.get_latest_block(), "REGISTER_PROPERTY")
+        db.commit()
         ledger._save_blockchain()
         _flash(request, f"Property '{property_key}' registered successfully.")
         return RedirectResponse(f"/properties/{property_key}", status_code=302)
@@ -573,6 +917,8 @@ async def transfer_post(
             stamp_duty_paid=stamp_duty_paid,
             registration_fee=registration_fee,
         )
+        _record_block_activity(db, user, ledger.get_latest_block(), "TRANSFER_PROPERTY")
+        db.commit()
         ledger._save_blockchain()
         _flash(request, f"Property '{property_key}' transferred successfully.")
         return RedirectResponse(f"/properties/{property_key}", status_code=302)
@@ -644,6 +990,8 @@ async def inherit_post(
             relationship=relationship,
             legal_heir_certificate_no=legal_heir_certificate_no,
         )
+        _record_block_activity(db, user, ledger.get_latest_block(), "INHERIT_PROPERTY")
+        db.commit()
         ledger._save_blockchain()
         _flash(request, f"Property '{property_key}' inherited successfully.")
         return RedirectResponse(f"/properties/{property_key}", status_code=302)
@@ -675,6 +1023,422 @@ async def search_page(
     user: User = Depends(require_officer_or_admin),
 ):
     return templates.TemplateResponse("search.html", _ctx(request, db))
+
+
+# ---------------------------------------------------------------------------
+# Corrections workflow
+# ---------------------------------------------------------------------------
+
+@app.get("/corrections", response_class=HTMLResponse)
+async def corrections_list(
+    request: Request,
+    status: str = "",
+    property_key: str = "",
+    request_id: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(require_officer_or_admin),
+):
+    query = db.query(CorrectionRequest)
+    if user.role == "officer":
+        query = query.filter(CorrectionRequest.submitted_officer_id == user.id)
+
+    status_value = status.strip().upper()
+    property_value = property_key.strip().upper()
+    request_value = request_id.strip().upper()
+
+    if status_value:
+        query = query.filter(CorrectionRequest.status == status_value)
+    if property_value:
+        query = query.filter(CorrectionRequest.property_key.contains(property_value))
+    if request_value:
+        query = query.filter(CorrectionRequest.request_id.contains(request_value))
+
+    try:
+        start_dt = _parse_filter_date(start_date)
+        end_dt = _parse_filter_date(end_date, end_of_day=True)
+    except ValueError:
+        flash = {"message": "Date filters must use YYYY-MM-DD.", "category": "error"}
+        return templates.TemplateResponse(
+            "corrections.html",
+            _ctx(
+                request,
+                db,
+                correction_requests=[],
+                filter_values={
+                    "status": status,
+                    "property_key": property_key,
+                    "request_id": request_id,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                },
+                flash=flash,
+            ),
+            status_code=422,
+        )
+
+    if start_dt is not None:
+        query = query.filter(CorrectionRequest.created_at >= start_dt)
+    if end_dt is not None:
+        query = query.filter(CorrectionRequest.created_at < end_dt)
+
+    requests = query.order_by(CorrectionRequest.created_at.desc()).all()
+
+    flash = _pop_flash(request)
+    return templates.TemplateResponse(
+        "corrections.html",
+        _ctx(
+            request,
+            db,
+            correction_requests=[_serialize_correction_request(req) for req in requests],
+            filter_values={
+                "status": status,
+                "property_key": property_key,
+                "request_id": request_id,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            flash=flash,
+        ),
+    )
+
+
+@app.get("/corrections/new", response_class=HTMLResponse)
+async def correction_new_page(
+    request: Request,
+    property_key: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_officer),
+):
+    ledger = _ledger(request)
+    history = []
+    current_state = None
+    form_data: Dict[str, Any] = {
+        "property_key": property_key or "",
+        "selected_fields": [],
+        "corrected_owner_name": "",
+        "corrected_aadhar_no": "",
+        "corrected_pan_no": "",
+        "corrected_address": "",
+        "corrected_pincode": "",
+        "corrected_value": "",
+    }
+    if property_key and property_key in ledger.property_index:
+        history = ledger.get_property_history(property_key)
+        current_state = ledger.get_property_current_state(property_key)
+        latest_valid_tx_id = _latest_valid_transaction_id(ledger, property_key)
+        form_data.update(
+            {
+                "original_transaction_id": latest_valid_tx_id,
+                "corrected_owner_name": current_state.get("owner", ""),
+                "corrected_aadhar_no": current_state.get("aadhar_no", ""),
+                "corrected_pan_no": current_state.get("pan_no", ""),
+                "corrected_address": current_state.get("address", ""),
+                "corrected_pincode": current_state.get("pincode", ""),
+                "corrected_value": str(current_state.get("value", "")),
+            }
+        )
+
+    flash = _pop_flash(request)
+    return templates.TemplateResponse(
+        "correction_new.html",
+        _ctx(
+            request,
+            db,
+            flash=flash,
+            form_data=form_data,
+            property_history=history,
+            current_state=current_state,
+        ),
+    )
+
+
+@app.post("/corrections/new")
+async def correction_new_post(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_officer),
+    property_key: str = Form(...),
+    original_transaction_id: str = Form(""),
+    error_description: str = Form(...),
+    supporting_notes: str = Form(""),
+    selected_fields: List[str] = Form([]),
+    corrected_owner_name: str = Form(""),
+    corrected_aadhar_no: str = Form(""),
+    corrected_pan_no: str = Form(""),
+    corrected_address: str = Form(""),
+    corrected_pincode: str = Form(""),
+    corrected_value: str = Form(""),
+):
+    ledger = _ledger(request)
+
+    property_key_clean = property_key.strip().upper()
+    selected_fields_normalized = _infer_selected_fields(
+        selected_fields,
+        corrected_owner_name=corrected_owner_name,
+        corrected_aadhar_no=corrected_aadhar_no,
+        corrected_pan_no=corrected_pan_no,
+        corrected_address=corrected_address,
+        corrected_pincode=corrected_pincode,
+        corrected_value=corrected_value,
+    )
+
+    tx_id_clean = original_transaction_id.strip().upper()
+    if not tx_id_clean and property_key_clean in ledger.property_index:
+        tx_id_clean = _latest_valid_transaction_id(ledger, property_key_clean)
+
+    form_data = {
+        "property_key": property_key_clean,
+        "original_transaction_id": tx_id_clean,
+        "error_description": error_description,
+        "supporting_notes": supporting_notes,
+        "selected_fields": selected_fields_normalized,
+        "corrected_owner_name": corrected_owner_name,
+        "corrected_aadhar_no": corrected_aadhar_no,
+        "corrected_pan_no": corrected_pan_no,
+        "corrected_address": corrected_address,
+        "corrected_pincode": corrected_pincode,
+        "corrected_value": corrected_value,
+    }
+
+    try:
+        if property_key_clean not in ledger.property_index:
+            raise ValueError(f"Property '{property_key_clean}' not found.")
+
+        try:
+            tx_record = ledger.get_property_transaction_by_id(property_key_clean, tx_id_clean)
+        except ValueError:
+            # If user entered an old/invalid id, fall back to latest VALID transaction.
+            tx_id_clean = _latest_valid_transaction_id(ledger, property_key_clean)
+            form_data["original_transaction_id"] = tx_id_clean
+            tx_record = ledger.get_property_transaction_by_id(property_key_clean, tx_id_clean)
+
+        if tx_record.get("status") != ledger.STATUS_VALID:
+            tx_id_clean = _latest_valid_transaction_id(ledger, property_key_clean)
+            form_data["original_transaction_id"] = tx_id_clean
+            tx_record = ledger.get_property_transaction_by_id(property_key_clean, tx_id_clean)
+            if tx_record.get("status") != ledger.STATUS_VALID:
+                raise ValueError("No VALID transaction is currently available for this property.")
+
+        requested_corrections = _build_requested_corrections(
+            ledger,
+            selected_fields=selected_fields_normalized,
+            corrected_owner_name=corrected_owner_name,
+            corrected_aadhar_no=corrected_aadhar_no,
+            corrected_pan_no=corrected_pan_no,
+            corrected_address=corrected_address,
+            corrected_pincode=corrected_pincode,
+            corrected_value=corrected_value,
+        )
+
+        request_id = _new_correction_request_id()
+        correction = CorrectionRequest(
+            request_id=request_id,
+            property_key=property_key_clean,
+            original_transaction_id=tx_id_clean,
+            error_description=error_description.strip(),
+            corrected_data_json=json.dumps(requested_corrections),
+            supporting_notes=supporting_notes.strip(),
+            submitted_officer_id=user.id,
+            submitted_officer_name=user.username,
+            status="PENDING_ADMIN_REVIEW",
+        )
+        db.add(correction)
+        _append_correction_audit(
+            db,
+            correction_request_id=request_id,
+            actor=user,
+            action_type="SUBMITTED",
+            comments=supporting_notes.strip(),
+        )
+        db.commit()
+
+        _flash(request, f"Correction request {request_id} submitted for admin review.")
+        return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+    except ValueError as exc:
+        history = []
+        state = None
+        if property_key_clean in ledger.property_index:
+            history = ledger.get_property_history(property_key_clean)
+            state = ledger.get_property_current_state(property_key_clean)
+        return templates.TemplateResponse(
+            "correction_new.html",
+            _ctx(
+                request,
+                db,
+                flash={"message": str(exc), "category": "error"},
+                form_data=form_data,
+                property_history=history,
+                current_state=state,
+            ),
+            status_code=200,
+        )
+
+
+@app.get("/corrections/{request_id}", response_class=HTMLResponse)
+async def correction_detail(
+    request_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_officer_or_admin),
+):
+    correction = db.query(CorrectionRequest).filter(CorrectionRequest.request_id == request_id).first()
+    if correction is None:
+        raise HTTPException(status_code=404, detail="Correction request not found.")
+
+    if user.role == "officer" and correction.submitted_officer_id != user.id:
+        raise HTTPException(status_code=403, detail="You can only view your own correction requests.")
+
+    audit_logs = (
+        db.query(CorrectionAuditLog)
+        .filter(CorrectionAuditLog.correction_request_id == request_id)
+        .order_by(CorrectionAuditLog.created_at.asc())
+        .all()
+    )
+    ledger = _ledger(request)
+    property_state = None
+    if correction.property_key in ledger.property_index:
+        property_state = ledger.get_property_current_state(correction.property_key)
+    flash = _pop_flash(request)
+    return templates.TemplateResponse(
+        "correction_detail.html",
+        _ctx(
+            request,
+            db,
+            correction=_serialize_correction_request(correction),
+            property_state=property_state,
+            audit_logs=audit_logs,
+            flash=flash,
+        ),
+    )
+
+
+@app.post("/corrections/{request_id}/admin-approve")
+async def correction_admin_approve(
+    request_id: str,
+    request: Request,
+    owner_name: str = Form(...),
+    aadhar_no: str = Form(...),
+    pan_no: str = Form(...),
+    address: str = Form(""),
+    pincode: str = Form(""),
+    value: str = Form(...),
+    comment: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    correction = db.query(CorrectionRequest).filter(CorrectionRequest.request_id == request_id).first()
+    if correction is None:
+        raise HTTPException(status_code=404, detail="Correction request not found.")
+
+    if correction.status != "PENDING_ADMIN_REVIEW":
+        _flash(request, "Only pending admin review requests can be approved.", "error")
+        return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+
+    ledger = _ledger(request)
+    try:
+        corrected_payload = _normalize_correction_payload(
+            ledger,
+            owner_name=owner_name,
+            aadhar_no=aadhar_no,
+            pan_no=pan_no,
+            address=address,
+            pincode=pincode,
+            value=value,
+        )
+        ledger.create_correction_transaction(
+            property_key=correction.property_key,
+            original_transaction_id=correction.original_transaction_id,
+            corrected_data=corrected_payload,
+            correction_request_id=correction.request_id,
+            approved_by_authority=f"admin:{user.username}",
+        )
+        _record_block_activity(db, user, ledger.get_latest_block(), "APPLY_CORRECTION")
+        db.commit()
+        ledger._save_blockchain()
+    except ValueError as exc:
+        _flash(request, str(exc), "error")
+        return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+
+    correction.corrected_data_json = json.dumps(corrected_payload)
+    correction.status = "APPROVED"
+    correction.finalized_at = datetime.now()
+    _append_correction_audit(
+        db,
+        correction_request_id=request_id,
+        actor=user,
+        action_type="ADMIN_APPROVED_APPLIED",
+        comments=comment.strip(),
+    )
+    db.commit()
+    _flash(request, f"Request {request_id} approved and correction block added.")
+    return RedirectResponse(f"/properties/{correction.property_key}", status_code=302)
+
+
+@app.post("/corrections/{request_id}/admin-reject")
+async def correction_admin_reject(
+    request_id: str,
+    request: Request,
+    comment: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    correction = db.query(CorrectionRequest).filter(CorrectionRequest.request_id == request_id).first()
+    if correction is None:
+        raise HTTPException(status_code=404, detail="Correction request not found.")
+
+    if correction.status != "PENDING_ADMIN_REVIEW":
+        _flash(request, "Only pending admin review requests can be rejected.", "error")
+        return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+
+    correction.status = "REJECTED"
+    correction.finalized_at = datetime.now()
+    _append_correction_audit(
+        db,
+        correction_request_id=request_id,
+        actor=user,
+        action_type="ADMIN_REJECTED",
+        comments=comment.strip(),
+    )
+    db.commit()
+    _flash(request, f"Request {request_id} was rejected.", "warning")
+    return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+
+
+@app.post("/corrections/{request_id}/admin-request-changes")
+async def correction_admin_request_changes(
+    request_id: str,
+    request: Request,
+    comment: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    correction = db.query(CorrectionRequest).filter(CorrectionRequest.request_id == request_id).first()
+    if correction is None:
+        raise HTTPException(status_code=404, detail="Correction request not found.")
+
+    if correction.status != "PENDING_ADMIN_REVIEW":
+        _flash(request, "Only pending admin review requests can be sent back for changes.", "error")
+        return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+
+    review_note = comment.strip()
+    if not review_note:
+        _flash(request, "Please provide feedback before requesting changes.", "error")
+        return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+
+    _append_correction_audit(
+        db,
+        correction_request_id=request_id,
+        actor=user,
+        action_type="ADMIN_REQUESTED_CHANGES",
+        comments=review_note,
+    )
+    db.commit()
+    _flash(request, f"Requested changes for {request_id}. Officer has been notified in audit trail.", "warning")
+    return RedirectResponse(f"/corrections/{request_id}", status_code=302)
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -725,6 +1489,84 @@ async def blockchain_explorer(
 # Admin — user management
 # ---------------------------------------------------------------------------
 
+@app.get("/users", response_class=HTMLResponse)
+async def users_overview(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_officer_or_admin),
+):
+    ledger = _ledger(request)
+    staff_users = db.query(User).order_by(User.created_at.asc()).all()
+    staff_work_summary = _activity_summary_by_user(db)
+    citizen_rows = _build_citizen_user_rows(db, ledger)
+    flash = _pop_flash(request)
+
+    return templates.TemplateResponse(
+        "users_overview.html",
+        _ctx(
+            request,
+            db,
+            staff_users=staff_users,
+            staff_work_summary=staff_work_summary,
+            citizen_rows=citizen_rows,
+            flash=flash,
+        ),
+    )
+
+
+@app.get("/users/citizen/{citizen_ref}", response_class=HTMLResponse)
+async def users_citizen_detail(
+    citizen_ref: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_officer_or_admin),
+):
+    ledger = _ledger(request)
+
+    citizen = None
+    ref = citizen_ref.strip()
+    if ref.isdigit():
+        citizen = db.query(Citizen).filter(Citizen.id == int(ref)).first()
+    if citizen is None and ref:
+        citizen = db.query(Citizen).filter(Citizen.customer_key == ref.upper()).first()
+
+    if citizen is None:
+        staff_users = db.query(User).order_by(User.created_at.asc()).all()
+        staff_work_summary = _activity_summary_by_user(db)
+        citizen_rows = _build_citizen_user_rows(db, ledger)
+        return templates.TemplateResponse(
+            "users_overview.html",
+            _ctx(
+                request,
+                db,
+                staff_users=staff_users,
+                staff_work_summary=staff_work_summary,
+                citizen_rows=citizen_rows,
+                flash={"message": f"Citizen '{citizen_ref}' was not found.", "category": "error"},
+            ),
+            status_code=200,
+        )
+
+    props = ledger.get_properties_by_customer_key(
+        citizen.customer_key,
+        aadhar_no=citizen.aadhar_no,
+        pan_no=citizen.pan_no,
+        owner_name=citizen.name,
+    )
+    flash = _pop_flash(request)
+
+    return templates.TemplateResponse(
+        "user_citizen_detail.html",
+        _ctx(
+            request,
+            db,
+            citizen_user=citizen,
+            current_properties=props.get("current", []),
+            past_properties=props.get("past", []),
+            flash=flash,
+        ),
+    )
+
 @app.get("/admin/users", response_class=HTMLResponse)
 async def admin_users(
     request: Request,
@@ -732,9 +1574,10 @@ async def admin_users(
     user: User = Depends(require_admin),
 ):
     all_users = db.query(User).order_by(User.created_at).all()
+    work_summary = _activity_summary_by_user(db)
     flash = _pop_flash(request)
     return templates.TemplateResponse(
-        "admin/users.html", _ctx(request, db, users=all_users, flash=flash)
+        "admin/users.html", _ctx(request, db, users=all_users, work_summary=work_summary, flash=flash)
     )
 
 
@@ -785,6 +1628,36 @@ async def admin_create_user_post(
     db.commit()
     _flash(request, f"User '{username}' ({role}) created successfully.")
     return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.get("/admin/users/{user_id}/activity", response_class=HTMLResponse)
+async def admin_user_activity(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    target = db.query(User).filter(User.id == user_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    activities = (
+        db.query(UserBlockActivity)
+        .filter(UserBlockActivity.user_id == user_id)
+        .order_by(UserBlockActivity.created_at.desc(), UserBlockActivity.id.desc())
+        .all()
+    )
+
+    return templates.TemplateResponse(
+        "admin/user_activity.html",
+        _ctx(
+            request,
+            db,
+            target_user=target,
+            activities=activities,
+            total_blocks=len(activities),
+        ),
+    )
 
 
 @app.post("/admin/users/{user_id}/suspend")
@@ -842,7 +1715,7 @@ async def htmx_lookup_custid(
 
     owner_info = ledger.get_owner_by_customer_key(cust_key)
 
-    # Fallback: check the citizens table in PostgreSQL
+    # Fallback: check the citizens table in SQLite
     if owner_info is None:
         citizen_record = db.query(Citizen).filter(Citizen.customer_key == cust_key).first()
         if citizen_record:
@@ -918,11 +1791,6 @@ async def htmx_validate_aadhar(
 
     if not ledger.validate_aadhar(aadhar_no):
         error = "Must be exactly 12 digits."
-    else:
-        try:
-            ledger.validate_aadhar_uniqueness(owner_name.strip().upper(), aadhar_no)
-        except ValueError as exc:
-            error = str(exc)
 
     return templates.TemplateResponse(
         "partials/field_feedback.html",
@@ -943,11 +1811,6 @@ async def htmx_validate_pan(
 
     if not ledger.validate_pan(pan_no):
         error = "Must be in format ABCDE1234F."
-    else:
-        try:
-            ledger.validate_pan_uniqueness(owner_name.strip().upper(), pan_no)
-        except ValueError as exc:
-            error = str(exc)
 
     return templates.TemplateResponse(
         "partials/field_feedback.html",
@@ -977,7 +1840,6 @@ async def htmx_validate_survey(
         "partials/field_feedback.html",
         {"request": request, "error": error, "value": survey_no},
     )
-
 
 @app.get("/htmx/search", response_class=HTMLResponse)
 async def htmx_search(
@@ -1055,7 +1917,7 @@ async def htmx_property_history(
 
     return templates.TemplateResponse(
         "partials/history_accordion.html",
-        {"request": request, "history": history, "property_key": key},
+        _ctx(request, db, history=history, property_key=key, is_admin=user.role == "admin"),
     )
 
 
@@ -1081,3 +1943,7 @@ async def not_found_handler(request: Request, exc: HTTPException):
     finally:
         db.close()
     return templates.TemplateResponse("404.html", ctx, status_code=404)
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}User Management &mdash; Pawperty{% endblock %}
 {% block content %}
+{% set work_map = work_summary | default({}, true) %}
 <div class="page-header">
   <h1 class="page-title">User Management</h1>
   <span class="role-badge role-admin">Admin Only</span>
@@ -15,6 +16,7 @@
         <th>Username</th>
         <th>Role</th>
         <th>Status</th>
+        <th>Tracked Blocks</th>
         <th>Created</th>
         <th>Actions</th>
       </tr>
@@ -37,8 +39,10 @@
           <span class="status-badge status-suspended">Suspended</span>
           {% endif %}
         </td>
+        <td class="text-center">{{ work_map.get(u.id, 0) }}</td>
         <td class="text-muted">{{ u.created_at.strftime('%d %b %Y') }}</td>
         <td>
+          <a href="/admin/users/{{ u.id }}/activity" class="btn btn-xs btn-outline">View</a>
           {% if u.id != current_user.id %}
           {% if u.is_active %}
           <form

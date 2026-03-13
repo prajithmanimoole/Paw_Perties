@@ -1,4 +1,4 @@
-"""PostgreSQL connection and session management for Pawperty user authentication."""
+"""SQLite connection and session management for Pawperty user authentication."""
 
 import os
 from sqlalchemy import create_engine
@@ -8,10 +8,12 @@ from typing import Generator
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:123456@localhost:5432/pawperty"
+    "sqlite:///./pawperty.sqlite"
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False}
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

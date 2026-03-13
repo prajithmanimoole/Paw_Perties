@@ -3,7 +3,12 @@
 {% block content %}
 <div class="page-header">
   <h1 class="page-title">All Properties</h1>
-  <a href="/register" class="btn btn-primary">+ Register New</a>
+  <div class="page-actions">
+    {% if current_user and current_user.role == 'officer' %}
+    <a href="/exports/properties-dataset.csv" class="btn btn-outline" hx-boost="false">Download Dataset CSV</a>
+    {% endif %}
+    <a href="/register" class="btn btn-primary">+ Register New</a>
+  </div>
 </div>
 
 {% if properties %}

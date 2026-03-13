@@ -78,11 +78,15 @@ class PropertyBlockchain:
     """Blockchain-based property ledger system."""
     
     DB_FILE = "pawperty_ledger.db"
+    STATUS_VALID = "VALID"
+    STATUS_CORRECTED = "CORRECTED"
+    STATUS_DISPUTED = "DISPUTED"
+    STATUS_REVOKED = "REVOKED"
     
     def __init__(self):
         self.chain: List[Block] = []
         self.property_index: Dict[str, List[int]] = {}
-        self.owner_registry: Dict[str, Owner] = {}  # Maps owner_name to Owner instance
+        self.owner_registry: Dict[str, Owner] = {}  # Maps customer_key to Owner instance
         self.aadhar_to_owner: Dict[str, str] = {}
         self.pan_to_owner: Dict[str, str] = {}
         self.customer_key_to_owner: Dict[str, str] = {}
@@ -99,7 +103,12 @@ class PropertyBlockchain:
         genesis_block = Block(
             index=0,
             timestamp=datetime.now().isoformat(),
-            data={"type": "genesis", "message": "Property Ledger Genesis Block"},
+            data={
+                "type": "genesis",
+                "message": "Property Ledger Genesis Block",
+                "status": self.STATUS_VALID,
+                "transaction_id": self._tx_id_for_index(0),
+            },
             previous_hash="0",
             property_key="GENESIS"
         )
@@ -108,6 +117,39 @@ class PropertyBlockchain:
     def get_latest_block(self) -> Block:
         """Return the most recent block in the chain."""
         return self.chain[-1]
+
+    @staticmethod
+    def _tx_id_for_index(index: int) -> str:
+        """Create a stable, human-readable transaction id from a block index."""
+        return f"TX{1000 + index}"
+
+    def _next_transaction_id(self) -> str:
+        """Return the transaction id for the block that would be appended next."""
+        return self._tx_id_for_index(len(self.chain))
+
+    def _property_correction_targets(self, property_key: str) -> Dict[str, str]:
+        """Map corrected transaction ids to the correction transaction id for a property."""
+        targets: Dict[str, str] = {}
+        for idx in self.property_index.get(property_key, []):
+            block = self.chain[idx]
+            if block.data.get("type") != "correction":
+                continue
+            if block.data.get("status", self.STATUS_VALID) != self.STATUS_VALID:
+                continue
+            previous_id = block.data.get("previous_transaction_id", "")
+            if not previous_id:
+                continue
+            correction_tx_id = block.data.get("transaction_id", self._tx_id_for_index(block.index))
+            targets[previous_id] = correction_tx_id
+        return targets
+
+    def get_property_transaction_by_id(self, property_key: str, transaction_id: str) -> Dict[str, Any]:
+        """Return a property transaction by transaction id."""
+        tx_id = transaction_id.strip().upper()
+        for record in self.get_property_history(property_key):
+            if record.get("transaction_id") == tx_id:
+                return record
+        raise ValueError(f"Transaction '{transaction_id}' not found for property '{property_key}'.")
     
     def validate_aadhar(self, aadhar: str) -> bool:
         """Validate Aadhar number format (12 digits)."""
@@ -153,23 +195,14 @@ class PropertyBlockchain:
             ValueError: If Aadhar is already used by someone else or owner has different Aadhar registered
         """
         aadhar_clean = aadhar.replace(" ", "").replace("-", "")
-        owner_normalized = owner.strip().upper()
-        
-        # Check if this owner already has a registered Aadhar
-        if owner_normalized in self.owner_registry:
-            registered_aadhar = self.owner_registry[owner_normalized].aadhar
-            if registered_aadhar != aadhar_clean:
-                raise ValueError(
-                    f"Identity mismatch: Owner '{owner_normalized}' is already registered "
-                    f"with Aadhar {registered_aadhar}. Same person cannot have multiple Aadhar numbers."
-                )
-        
+
         # Check if this Aadhar is already used by someone else
         if aadhar_clean in self.aadhar_to_owner:
-            existing_owner = self.aadhar_to_owner[aadhar_clean]
-            if existing_owner != owner_normalized:
+            owner_key = self.aadhar_to_owner[aadhar_clean]
+            existing_owner = self.owner_registry.get(owner_key)
+            if existing_owner is not None:
                 raise ValueError(
-                    f"Aadhar number {aadhar_clean} is already registered to '{existing_owner}'. "
+                    f"Aadhar number {aadhar_clean} is already registered to '{existing_owner.name}'. "
                     f"Each Aadhar must be unique."
                 )
     
@@ -180,23 +213,14 @@ class PropertyBlockchain:
             ValueError: If PAN is already used by someone else or owner has different PAN registered
         """
         pan_clean = pan.upper()
-        owner_normalized = owner.strip().upper()
-        
-        # Check if this owner already has a registered PAN
-        if owner_normalized in self.owner_registry:
-            registered_pan = self.owner_registry[owner_normalized].pan
-            if registered_pan != pan_clean:
-                raise ValueError(
-                    f"Identity mismatch: Owner '{owner_normalized}' is already registered "
-                    f"with PAN {registered_pan}. Same person cannot have multiple PAN numbers."
-                )
-        
+
         # Check if this PAN is already used by someone else
         if pan_clean in self.pan_to_owner:
-            existing_owner = self.pan_to_owner[pan_clean]
-            if existing_owner != owner_normalized:
+            owner_key = self.pan_to_owner[pan_clean]
+            existing_owner = self.owner_registry.get(owner_key)
+            if existing_owner is not None:
                 raise ValueError(
-                    f"PAN number {pan_clean} is already registered to '{existing_owner}'. "
+                    f"PAN number {pan_clean} is already registered to '{existing_owner.name}'. "
                     f"Each PAN must be unique."
                 )
     
@@ -221,51 +245,47 @@ class PropertyBlockchain:
                     f"Each survey number must be unique."
                 )
     
-    def register_or_validate_owner(self, owner: Owner) -> bool:
-        """Register a new owner or validate existing owner's identity."""
-        owner_normalized = owner.name
+    def register_or_validate_owner(self, owner: Owner) -> Owner:
+        """Register a new owner or validate an existing owner's identity."""
         aadhar_clean = owner.aadhar
         pan_clean = owner.pan
-        # Check if this owner already exists
-        if owner_normalized in self.owner_registry:
-            reg_owner = self.owner_registry[owner_normalized]
+
+        owner_key_from_aadhar = self.aadhar_to_owner.get(aadhar_clean, "")
+        owner_key_from_pan = self.pan_to_owner.get(pan_clean, "")
+
+        if owner_key_from_aadhar and owner_key_from_pan and owner_key_from_aadhar != owner_key_from_pan:
+            aadhar_owner = self.owner_registry[owner_key_from_aadhar]
+            pan_owner = self.owner_registry[owner_key_from_pan]
+            raise ValueError(
+                "Identity mismatch: provided Aadhar and PAN belong to different registered owners "
+                f"('{aadhar_owner.name}' and '{pan_owner.name}')."
+            )
+
+        existing_owner_key = owner_key_from_aadhar or owner_key_from_pan
+        if existing_owner_key:
+            reg_owner = self.owner_registry[existing_owner_key]
             if reg_owner.aadhar != aadhar_clean:
                 raise ValueError(
-                    f"Identity mismatch: Owner '{owner_normalized}' is already registered "
+                    f"Identity mismatch: Owner '{reg_owner.name}' is already registered "
                     f"with Aadhar {reg_owner.aadhar}, but provided {aadhar_clean}. "
                     "Same person cannot have multiple Aadhar numbers."
                 )
             if reg_owner.pan != pan_clean:
                 raise ValueError(
-                    f"Identity mismatch: Owner '{owner_normalized}' is already registered "
+                    f"Identity mismatch: Owner '{reg_owner.name}' is already registered "
                     f"with PAN {reg_owner.pan}, but provided {pan_clean}. "
                     "Same person cannot have multiple PAN numbers."
                 )
-            return True
-        if aadhar_clean in self.aadhar_to_owner:
-            existing_owner = self.aadhar_to_owner[aadhar_clean]
-            if existing_owner != owner_normalized:
-                raise ValueError(
-                    f"Aadhar number {aadhar_clean} is already registered to '{existing_owner}'. "
-                    f"Cannot register same Aadhar to '{owner_normalized}'. "
-                    "Each Aadhar must be unique."
-                )
-        if pan_clean in self.pan_to_owner:
-            existing_owner = self.pan_to_owner[pan_clean]
-            if existing_owner != owner_normalized:
-                raise ValueError(
-                    f"PAN number {pan_clean} is already registered to '{existing_owner}'. "
-                    f"Cannot register same PAN to '{owner_normalized}'. "
-                    "Each PAN must be unique."
-                )
-        self.owner_registry[owner_normalized] = owner
-        self.aadhar_to_owner[aadhar_clean] = owner_normalized
-        self.pan_to_owner[pan_clean] = owner_normalized
-        self.customer_key_to_owner[owner.customer_key] = owner_normalized
-        print(f"✓ Identity registered: {owner_normalized}")
+            return reg_owner
+
+        self.owner_registry[owner.customer_key] = owner
+        self.aadhar_to_owner[aadhar_clean] = owner.customer_key
+        self.pan_to_owner[pan_clean] = owner.customer_key
+        self.customer_key_to_owner[owner.customer_key] = owner.customer_key
+        print(f"✓ Identity registered: {owner.name}")
         print(f"  Customer Key: {owner.customer_key}")
         print(f"  Aadhar: {aadhar_clean} | PAN: {pan_clean}")
-        return True
+        return owner
     
     def get_owner_by_customer_key(self, customer_key: str) -> Optional[Dict[str, Any]]:
         """Get owner information by customer key.
@@ -277,8 +297,10 @@ class PropertyBlockchain:
             Dictionary with owner information or None if not found
         """
         if customer_key in self.customer_key_to_owner:
-            owner_name = self.customer_key_to_owner[customer_key]
-            return self.owner_registry[owner_name].to_dict()
+            owner_key = self.customer_key_to_owner[customer_key]
+            owner = self.owner_registry.get(owner_key)
+            if owner is not None:
+                return owner.to_dict()
         return None
     
     def add_property(self, property_key: str, owner: Owner, address: str, 
@@ -323,11 +345,11 @@ class PropertyBlockchain:
             raise ValueError("Invalid PAN number. Must be in format: ABCDE1234F")
         # Validate all constraints before mutating any registry
         self.validate_survey_uniqueness(survey_no)
-        self.register_or_validate_owner(owner)
-        # Use key from registry in case this owner already existed before this call
-        registered_owner = self.owner_registry[owner.name]
+        registered_owner = self.register_or_validate_owner(owner)
         data = {
             "type": "registration",
+            "status": self.STATUS_VALID,
+            "transaction_id": self._next_transaction_id(),
             "owner": registered_owner.name,
             "customer_key": registered_owner.customer_key,
             "aadhar_no": registered_owner.aadhar,
@@ -396,22 +418,19 @@ class PropertyBlockchain:
             raise ValueError("Invalid PAN number for new owner. Must be in format: ABCDE1234F")
         
         # Register or validate new owner (ensures Aadhar and PAN uniqueness)
-        self.register_or_validate_owner(new_owner)
+        registered_owner = self.register_or_validate_owner(new_owner)
         
         # Get current property state
         current_state = self.get_property_current_state(property_key)
         previous_owner = current_state["owner"]
+        previous_owner_key = current_state.get("customer_key", "")
         
         # Prevent self-transfer: owner cannot sell property to themselves
-        if previous_owner.strip().upper() == new_owner.name.strip().upper():
+        if previous_owner_key and previous_owner_key == registered_owner.customer_key:
             raise ValueError(
                 f"Cannot transfer property to the same owner. "
                 f"'{previous_owner}' already owns this property."
             )
-        
-        # Retrieve the registered customer key (may differ from the one on the passed Owner object
-        # if the owner already existed in the registry before this call)
-        registered_owner = self.owner_registry[new_owner.name]
         
         # Determine actual transfer value (explicit None check to allow 0.0)
         actual_transfer_value = transfer_value if transfer_value is not None else current_state.get("value")
@@ -424,6 +443,8 @@ class PropertyBlockchain:
         
         data = {
             "type": "transfer",
+            "status": self.STATUS_VALID,
+            "transaction_id": self._next_transaction_id(),
             "transfer_reason": transfer_reason.strip().upper(),
             "previous_owner": previous_owner,
             "previous_owner_aadhar": current_state.get("aadhar_no", ""),
@@ -489,6 +510,114 @@ class PropertyBlockchain:
             transfer_reason="inheritance",
             additional_info=info
         )
+
+    def create_correction_transaction(
+        self,
+        property_key: str,
+        original_transaction_id: str,
+        corrected_data: Dict[str, Any],
+        correction_request_id: str,
+        approved_by_authority: str,
+    ) -> Block:
+        """Append a correction block without mutating historical transactions."""
+        if property_key not in self.property_index:
+            raise ValueError(f"Property with key '{property_key}' not found.")
+
+        original_tx = self.get_property_transaction_by_id(property_key, original_transaction_id)
+        original_status = original_tx.get("status", self.STATUS_VALID)
+        if original_status != self.STATUS_VALID:
+            raise ValueError(f"Transaction '{original_transaction_id}' is not in VALID state.")
+
+        snapshot = self.get_property_current_state(property_key)
+
+        owner_name = str(corrected_data.get("owner_name", snapshot.get("owner", ""))).strip().upper()
+        aadhar_no = str(corrected_data.get("aadhar_no", snapshot.get("aadhar_no", ""))).replace(" ", "").replace("-", "")
+        pan_no = str(corrected_data.get("pan_no", snapshot.get("pan_no", ""))).strip().upper()
+
+        if not owner_name:
+            raise ValueError("Owner name cannot be empty.")
+        if not self.validate_aadhar(aadhar_no):
+            raise ValueError("Invalid Aadhar number. Must be 12 digits.")
+        if not self.validate_pan(pan_no):
+            raise ValueError("Invalid PAN number. Must be in format: ABCDE1234F")
+
+        same_identity_name_correction = (
+            aadhar_no == snapshot.get("aadhar_no", "")
+            and pan_no == snapshot.get("pan_no", "")
+            and owner_name != snapshot.get("owner", "")
+        )
+
+        if same_identity_name_correction:
+            corrected_owner = Owner.from_dict(
+                {
+                    "name": owner_name,
+                    "aadhar": aadhar_no,
+                    "pan": pan_no,
+                    "customer_key": snapshot.get("customer_key", "") or Owner(owner_name, aadhar_no, pan_no).customer_key,
+                }
+            )
+            self.owner_registry[corrected_owner.customer_key] = corrected_owner
+            self.aadhar_to_owner[aadhar_no] = corrected_owner.customer_key
+            self.pan_to_owner[pan_no] = corrected_owner.customer_key
+            self.customer_key_to_owner[corrected_owner.customer_key] = corrected_owner.customer_key
+        else:
+            corrected_owner = Owner(owner_name, aadhar_no, pan_no)
+            corrected_owner = self.register_or_validate_owner(corrected_owner)
+
+        corrected_value = corrected_data.get("value", snapshot.get("value", 0))
+        corrected_address = str(corrected_data.get("address", snapshot.get("address", ""))).strip().upper()
+        corrected_pincode = str(corrected_data.get("pincode", snapshot.get("pincode", ""))).strip().upper()
+
+        payload = {
+            "owner_name": corrected_owner.name,
+            "aadhar_no": corrected_owner.aadhar,
+            "pan_no": corrected_owner.pan,
+            "address": corrected_address,
+            "pincode": corrected_pincode,
+            "value": corrected_value,
+        }
+
+        data = {
+            "type": "correction",
+            "status": self.STATUS_VALID,
+            "transaction_id": self._next_transaction_id(),
+            "previous_transaction_id": original_transaction_id.strip().upper(),
+            "correction_request_id": correction_request_id,
+            "approved_by_authority": approved_by_authority,
+            "previous_snapshot": {
+                "owner": snapshot.get("owner", ""),
+                "aadhar_no": snapshot.get("aadhar_no", ""),
+                "pan_no": snapshot.get("pan_no", ""),
+                "address": snapshot.get("address", ""),
+                "pincode": snapshot.get("pincode", ""),
+                "value": snapshot.get("value", 0),
+            },
+            "corrected_fields": payload,
+            "new_owner": corrected_owner.name,
+            "new_owner_customer_key": corrected_owner.customer_key,
+            "new_owner_aadhar": corrected_owner.aadhar,
+            "new_owner_pan": corrected_owner.pan,
+            "address": corrected_address,
+            "pincode": corrected_pincode,
+            "value": corrected_value,
+            "location": snapshot.get("location", {}),
+            "survey_no": snapshot.get("survey_no", ""),
+            "rtc_no": snapshot.get("rtc_no", ""),
+            "land_details": snapshot.get("land_details", {}),
+            "description": snapshot.get("description", ""),
+            "additional_info": {"reason": "BLOCKCHAIN_CORRECTION"},
+        }
+
+        new_block = Block(
+            index=len(self.chain),
+            timestamp=datetime.now().isoformat(),
+            data=data,
+            previous_hash=self.get_latest_block().hash,
+            property_key=property_key,
+        )
+        self.chain.append(new_block)
+        self.property_index[property_key].append(new_block.index)
+        return new_block
     
     def get_property_history(self, property_key: str) -> List[Dict[str, Any]]:
         """
@@ -504,7 +633,42 @@ class PropertyBlockchain:
             raise ValueError(f"Property with key '{property_key}' not found.")
         
         block_indices = self.property_index[property_key]
-        history = [self.chain[idx].to_dict() for idx in block_indices]
+        corrected_targets = self._property_correction_targets(property_key)
+        history: List[Dict[str, Any]] = []
+
+        for idx in block_indices:
+            record = self.chain[idx].to_dict()
+            tx_id = record["data"].get("transaction_id", self._tx_id_for_index(record["index"]))
+            status_value = record["data"].get("status", self.STATUS_VALID)
+            if status_value == self.STATUS_VALID and tx_id in corrected_targets:
+                status_value = self.STATUS_CORRECTED
+
+            raw_type = record["data"].get("type", "unknown")
+            display_type = raw_type
+            display_label = raw_type.upper()
+            display_data = record["data"]
+
+            if raw_type == "correction":
+                display_type = "registration"
+                display_label = "REGISTERED"
+                display_data = {
+                    **record["data"],
+                    "owner": record["data"].get("new_owner", ""),
+                    "customer_key": record["data"].get("new_owner_customer_key", ""),
+                    "aadhar_no": record["data"].get("new_owner_aadhar", ""),
+                    "pan_no": record["data"].get("new_owner_pan", ""),
+                    "address": record["data"].get("address", ""),
+                    "pincode": record["data"].get("pincode", ""),
+                    "value": record["data"].get("value", 0),
+                    "survey_no": record["data"].get("survey_no", ""),
+                }
+
+            record["transaction_id"] = tx_id
+            record["event_type"] = display_label
+            record["status"] = status_value
+            record["display_type"] = display_type
+            record["display_data"] = display_data
+            history.append(record)
         return history
     
     def get_property_current_state(self, property_key: str) -> Dict[str, Any]:
@@ -548,18 +712,31 @@ class PropertyBlockchain:
             "total_transfers": len(history) - 1
         }
         
-        # Update with latest transfer info if any
+        # Update with latest transfer/correction info if any
         if len(history) > 1:
             latest_data = history[-1]["data"]
-            current_state["owner"] = latest_data["new_owner"]
-            current_state["customer_key"] = latest_data.get("new_owner_customer_key", "")
-            current_state["aadhar_no"] = latest_data.get("new_owner_aadhar", "")
-            current_state["pan_no"] = latest_data.get("new_owner_pan", "")
-            # Valuation = transfer price + stamp duty + registration fee
-            if latest_data.get("total_value") is not None:
-                current_state["value"] = latest_data["total_value"]
-            elif latest_data.get("transfer_value") is not None:
-                current_state["value"] = latest_data["transfer_value"]
+            latest_type = latest_data.get("type", "")
+            if latest_type in ("transfer", "inheritance"):
+                current_state["owner"] = latest_data["new_owner"]
+                current_state["customer_key"] = latest_data.get("new_owner_customer_key", "")
+                current_state["aadhar_no"] = latest_data.get("new_owner_aadhar", "")
+                current_state["pan_no"] = latest_data.get("new_owner_pan", "")
+                # Valuation = transfer price + stamp duty + registration fee
+                if latest_data.get("total_value") is not None:
+                    current_state["value"] = latest_data["total_value"]
+                elif latest_data.get("transfer_value") is not None:
+                    current_state["value"] = latest_data["transfer_value"]
+            elif latest_type == "correction":
+                current_state["owner"] = latest_data.get("new_owner", current_state["owner"])
+                current_state["customer_key"] = latest_data.get("new_owner_customer_key", current_state["customer_key"])
+                current_state["aadhar_no"] = latest_data.get("new_owner_aadhar", current_state["aadhar_no"])
+                current_state["pan_no"] = latest_data.get("new_owner_pan", current_state["pan_no"])
+                current_state["address"] = latest_data.get("address", current_state["address"])
+                current_state["pincode"] = latest_data.get("pincode", current_state["pincode"])
+                current_state["value"] = latest_data.get("value", current_state["value"])
+
+        current_state["status"] = history[-1].get("status", self.STATUS_VALID)
+        current_state["last_transaction_id"] = history[-1].get("transaction_id", "")
         
         return current_state
     
@@ -608,7 +785,68 @@ class PropertyBlockchain:
                 continue
         return results
 
-    def get_properties_by_customer_key(self, customer_key: str) -> Dict[str, List[Dict[str, Any]]]:
+    @staticmethod
+    def _normalized_identity(
+        customer_key: str,
+        aadhar_no: str = "",
+        pan_no: str = "",
+        owner_name: str = "",
+    ) -> Dict[str, str]:
+        """Normalize a citizen identity for property ownership matching."""
+        return {
+            "customer_key": customer_key.strip().upper(),
+            "aadhar_no": aadhar_no.replace(" ", "").replace("-", ""),
+            "pan_no": pan_no.strip().upper(),
+            "owner_name": owner_name.strip().upper(),
+        }
+
+    @staticmethod
+    def _matches_identity(
+        identity: Dict[str, str],
+        record: Dict[str, Any],
+        mappings: Dict[str, str],
+    ) -> bool:
+        """Return True when any provided identity field matches the record."""
+        for identity_field, record_field in mappings.items():
+            identity_value = identity.get(identity_field, "")
+            if not identity_value:
+                continue
+
+            record_value = str(record.get(record_field, "")).strip().upper()
+            if identity_field == "aadhar_no":
+                record_value = record_value.replace(" ", "").replace("-", "")
+
+            if record_value == identity_value:
+                return True
+        return False
+
+    @staticmethod
+    def _owner_snapshot_from_record(record: Dict[str, Any]) -> Dict[str, str]:
+        """Extract the resulting owner identity after a history record is applied."""
+        record_type = record.get("type", "")
+
+        if record_type == "registration":
+            return {
+                "owner_name": str(record.get("owner", "")).strip().upper(),
+                "customer_key": str(record.get("customer_key", "")).strip().upper(),
+                "aadhar_no": str(record.get("aadhar_no", "")).replace(" ", "").replace("-", ""),
+                "pan_no": str(record.get("pan_no", "")).strip().upper(),
+            }
+
+        return {
+            "owner_name": str(record.get("new_owner", record.get("owner", ""))).strip().upper(),
+            "customer_key": str(record.get("new_owner_customer_key", record.get("customer_key", ""))).strip().upper(),
+            "aadhar_no": str(record.get("new_owner_aadhar", record.get("aadhar_no", ""))).replace(" ", "").replace("-", ""),
+            "pan_no": str(record.get("new_owner_pan", record.get("pan_no", ""))).strip().upper(),
+        }
+
+    def get_properties_by_customer_key(
+        self,
+        customer_key: str,
+        aadhar_no: str = "",
+        pan_no: str = "",
+        owner_name: str = "",
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Find all properties linked to a customer key — both currently owned
         and previously owned (transferred away).
@@ -622,6 +860,7 @@ class PropertyBlockchain:
         """
         current: List[Dict[str, Any]] = []
         past: List[Dict[str, Any]] = []
+        identity = self._normalized_identity(customer_key, aadhar_no, pan_no, owner_name)
 
         for property_key in self.property_index:
             try:
@@ -631,53 +870,51 @@ class PropertyBlockchain:
                 continue
 
             # Check if citizen currently owns this property
-            if state.get("customer_key") == customer_key:
+            if self._matches_identity(
+                identity,
+                state,
+                {
+                    "customer_key": "customer_key",
+                    "aadhar_no": "aadhar_no",
+                    "pan_no": "pan_no",
+                    "owner_name": "owner",
+                },
+            ):
                 current.append(state)
                 continue
 
-            # Check if citizen previously owned this property
-            for i, record in enumerate(history):
-                data = record["data"]
-                rec_type = data.get("type", "")
+            ownership_started_on = ""
+            latest_past_entry: Optional[Dict[str, Any]] = None
 
-                # Was the citizen the original registrant who later lost ownership?
-                if rec_type == "registration" and data.get("customer_key") == customer_key:
-                    # Find the transfer where they lost it
-                    transferred_on = ""
-                    transferred_to = ""
-                    for j in range(i + 1, len(history)):
-                        next_data = history[j]["data"]
-                        if next_data.get("previous_customer_key") == customer_key:
-                            transferred_on = history[j]["timestamp"]
-                            transferred_to = next_data.get("new_owner", "")
-                            break
-                    past.append({
-                        **state,
-                        "owned_from": record["timestamp"],
-                        "transferred_on": transferred_on,
-                        "transferred_to": transferred_to,
-                    })
-                    break
-
-                # Was the citizen a transfer recipient who later transferred away?
-                if rec_type == "transfer" and data.get("new_owner_customer_key") == customer_key:
-                    # Find the next transfer where they lost ownership
-                    transferred_on = ""
-                    transferred_to = ""
-                    for j in range(i + 1, len(history)):
-                        next_data = history[j]["data"]
-                        if next_data.get("previous_customer_key") == customer_key:
-                            transferred_on = history[j]["timestamp"]
-                            transferred_to = next_data.get("new_owner", "")
-                            break
-                    if transferred_on:
-                        past.append({
+            for record in history:
+                owner_snapshot = self._owner_snapshot_from_record(record["data"])
+                if not self._matches_identity(
+                    identity,
+                    owner_snapshot,
+                    {
+                        "customer_key": "customer_key",
+                        "aadhar_no": "aadhar_no",
+                        "pan_no": "pan_no",
+                        "owner_name": "owner_name",
+                    },
+                ):
+                    if ownership_started_on:
+                        transfer_reason = str(record["data"].get("transfer_reason", "")).strip().upper()
+                        latest_past_entry = {
                             **state,
-                            "owned_from": record["timestamp"],
-                            "transferred_on": transferred_on,
-                            "transferred_to": transferred_to,
-                        })
-                        break
+                            "owned_from": ownership_started_on,
+                            "transferred_on": record["timestamp"],
+                            "transferred_to": owner_snapshot.get("owner_name", ""),
+                            "transfer_reason": transfer_reason or record["data"].get("type", "").upper(),
+                        }
+                        ownership_started_on = ""
+                    continue
+
+                if not ownership_started_on:
+                    ownership_started_on = record["timestamp"]
+
+            if latest_past_entry is not None:
+                past.append(latest_past_entry)
 
         return {"current": current, "past": past}
 
@@ -924,8 +1161,8 @@ class PropertyBlockchain:
             blockchain_data = {
                 "chain": [block.to_dict() for block in self.chain],
                 "property_index": self.property_index,
-                "owner_registry": {name: owner.to_dict()
-                                   for name, owner in self.owner_registry.items()},
+                "owner_registry": {customer_key: owner.to_dict()
+                                   for customer_key, owner in self.owner_registry.items()},
                 "aadhar_to_owner": self.aadhar_to_owner,
                 "pan_to_owner": self.pan_to_owner,
                 "customer_key_to_owner": self.customer_key_to_owner,
@@ -999,13 +1236,19 @@ class PropertyBlockchain:
 
             self.property_index = blockchain_data["property_index"]
 
+            raw_owner_registry = blockchain_data.get("owner_registry", {})
             self.owner_registry = {}
-            for name, owner_dict in blockchain_data.get("owner_registry", {}).items():
-                self.owner_registry[name] = Owner.from_dict(owner_dict)
+            self.aadhar_to_owner = {}
+            self.pan_to_owner = {}
+            self.customer_key_to_owner = {}
 
-            self.aadhar_to_owner = blockchain_data.get("aadhar_to_owner", {})
-            self.pan_to_owner = blockchain_data.get("pan_to_owner", {})
-            self.customer_key_to_owner = blockchain_data.get("customer_key_to_owner", {})
+            for owner_dict in raw_owner_registry.values():
+                owner = Owner.from_dict(owner_dict)
+                self.owner_registry[owner.customer_key] = owner
+                self.aadhar_to_owner[owner.aadhar] = owner.customer_key
+                self.pan_to_owner[owner.pan] = owner.customer_key
+                self.customer_key_to_owner[owner.customer_key] = owner.customer_key
+
             self.survey_to_property = blockchain_data.get("survey_to_property", {})
 
             if not self.is_chain_valid():

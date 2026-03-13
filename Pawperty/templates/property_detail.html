@@ -8,6 +8,10 @@
       Registered on {{ property.registered_on[:10] }} &bull; Last updated {{
       property.last_updated[:10] }}
     </p>
+    <p>
+      <span class="tx-status tx-status-{{ property.status|lower }}">{{ property.status }}</span>
+      <span class="text-muted">Latest Tx: {{ property.last_transaction_id }}</span>
+    </p>
   </div>
   <div class="page-actions">
     <a href="/transfer?key={{ property.property_key }}" class="btn btn-primary"
@@ -16,6 +20,11 @@
     <a href="/inherit?key={{ property.property_key }}" class="btn btn-outline"
       >Inherit</a
     >
+    {% if current_user and current_user.role == 'officer' %}
+    <a href="/corrections/new?property_key={{ property.property_key }}" class="btn btn-ghost"
+      >Request Correction</a
+    >
+    {% endif %}
   </div>
 </div>
 
@@ -29,9 +38,21 @@
       <dt>Customer Key</dt>
       <dd><code>{{ property.customer_key }}</code></dd>
       <dt>Aadhar No.</dt>
-      <dd>{{ property.aadhar_no[:4] }}****{{ property.aadhar_no[-4:] }}</dd>
+      <dd>
+        {% if current_user and current_user.role == 'admin' %}
+          {{ property.aadhar_no }}
+        {% else %}
+          {{ property.aadhar_no[:4] }}****{{ property.aadhar_no[-4:] }}
+        {% endif %}
+      </dd>
       <dt>PAN No.</dt>
-      <dd>{{ property.pan_no[:5] }}****</dd>
+      <dd>
+        {% if current_user and current_user.role == 'admin' %}
+          {{ property.pan_no }}
+        {% else %}
+          {{ property.pan_no[:5] }}****
+        {% endif %}
+      </dd>
       <dt>Total Transfers</dt>
       <dd>{{ property.total_transfers }}</dd>
     </dl>

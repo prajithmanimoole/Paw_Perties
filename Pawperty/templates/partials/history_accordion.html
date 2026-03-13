@@ -2,31 +2,36 @@
 {% if history %}
 <div class="history-timeline">
   {% for record in history %}
-  <div class="history-item history-{{ record.data.type }}">
+  <div class="history-item history-{{ record.display_type | default(record.data.type) }}">
     <div class="history-icon">
-      {% if record.data.type == 'genesis' %}{{ gear(20) }}{% elif record.data.type ==
-      'registration' %}{{ house(20) }}{% elif record.data.type == 'transfer' %}{{ transfer(20) }}{% else
+      {% if record.display_type | default(record.data.type) == 'genesis' %}{{ gear(20) }}{% elif record.display_type | default(record.data.type) ==
+      'registration' %}{{ house(20) }}{% elif record.display_type | default(record.data.type) == 'transfer' %}{{ transfer(20) }}{% else
       %}{{ scroll(20) }}{% endif %}
     </div>
     <div class="history-content">
       <div class="history-header">
-        <span class="type-badge type-{{ record.data.type }}"
-          >{{ record.data.type | upper }}</span
+        <span class="type-badge type-{{ record.display_type | default(record.data.type) }}"
+          >{{ record.event_type | default(record.data.type | upper) }}</span
         >
+        <span class="tx-status tx-status-{{ record.status|lower }}">{{ record.status }}</span>
+        <span class="history-tx text-muted">{{ record.transaction_id }}</span>
         <span class="history-timestamp text-muted"
           >{{ record.timestamp[:19].replace('T', ' ') }}</span
         >
         <span class="history-block text-muted">Block #{{ record.index }}</span>
       </div>
 
-      {% if record.data.type == 'registration' %}
+      {% if record.display_type | default(record.data.type) == 'registration' %}
       <div class="history-body">
-        <p><strong>Registered by:</strong> {{ record.data.owner }}</p>
-        <p><strong>Address:</strong> {{ record.data.address }}</p>
-        <p><strong>Survey No:</strong> {{ record.data.survey_no }}</p>
+        <p><strong>Registered by:</strong> {{ record.display_data.owner }}</p>
+        <p><strong>Address:</strong> {{ record.display_data.address }}</p>
+        <p><strong>Survey No:</strong> {{ record.display_data.survey_no }}</p>
         <p>
-          <strong>Value:</strong> ₹{{ "{:,.0f}".format(record.data.value) }}
+          <strong>Value:</strong> ₹{{ "{:,.0f}".format(record.display_data.value) }}
         </p>
+        {% if record.data.type == 'correction' %}
+        <p><strong>Replaces Transaction:</strong> {{ record.data.previous_transaction_id }}</p>
+        {% endif %}
       </div>
 
       {% elif record.data.type in ('transfer', 'inheritance') %}
@@ -61,6 +66,21 @@
           record.data.additional_info.legal_heir_certificate_no }}
         </p>
         {% endif %}
+      </div>
+      {% elif record.data.type == 'correction' %}
+      <div class="history-body">
+        <p><strong>Correction Of:</strong> {{ record.data.previous_transaction_id }}</p>
+        <p><strong>Correction Request:</strong> {{ record.data.correction_request_id }}</p>
+        <p><strong>Approved By:</strong> {{ record.data.approved_by_authority }}</p>
+        <p>
+          <strong>Correct Owner:</strong> {{ record.data.new_owner }}
+          {% if is_admin %}
+          <span class="text-muted">(Aadhar {{ record.data.new_owner_aadhar }}, PAN {{ record.data.new_owner_pan }})</span>
+          {% else %}
+          <span class="text-muted">(PAN {{ record.data.new_owner_pan[:5] }}****)</span>
+          {% endif %}
+        </p>
+        <p><strong>Correct Value:</strong> ₹{{ "{:,.0f}".format(record.data.value) }}</p>
       </div>
       {% endif %}
 

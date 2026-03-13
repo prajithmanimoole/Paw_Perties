@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Correction Requests &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Correction Requests</h1>
+  {% if current_user.role == 'officer' %}
+  <a href="/corrections/new" class="btn btn-primary">+ New Correction Request</a>
+  {% endif %}
+</div>
+
+<form action="/corrections" method="get" class="filter-panel">
+  <div class="filter-grid">
+    <div class="form-group">
+      <label class="form-label" for="status">Status</label>
+      <select id="status" name="status" class="form-input form-select">
+        <option value="">All statuses</option>
+        <option value="PENDING_ADMIN_REVIEW" {{ 'selected' if filter_values.status == 'PENDING_ADMIN_REVIEW' else '' }}>Pending Admin Review</option>
+        <option value="APPROVED" {{ 'selected' if filter_values.status == 'APPROVED' else '' }}>Approved</option>
+        <option value="REJECTED" {{ 'selected' if filter_values.status == 'REJECTED' else '' }}>Rejected</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="property_key">Property ID</label>
+      <input id="property_key" name="property_key" class="form-input" value="{{ filter_values.property_key }}" placeholder="PR1001" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="request_id">Request ID</label>
+      <input id="request_id" name="request_id" class="form-input" value="{{ filter_values.request_id }}" placeholder="CR102" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="start_date">From Date</label>
+      <input id="start_date" name="start_date" type="date" class="form-input" value="{{ filter_values.start_date }}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="end_date">To Date</label>
+      <input id="end_date" name="end_date" type="date" class="form-input" value="{{ filter_values.end_date }}" />
+    </div>
+  </div>
+  <div class="form-actions">
+    <a href="/corrections" class="btn btn-ghost">Reset</a>
+    <button type="submit" class="btn btn-primary">Apply Filters</button>
+  </div>
+</form>
+
+{% if correction_requests %}
+<div class="table-wrapper">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Request ID</th>
+        <th>Property</th>
+        <th>Original Tx</th>
+        <th>Submitted By</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in correction_requests %}
+      <tr>
+        <td><strong>{{ item.request_id }}</strong></td>
+        <td><a href="/properties/{{ item.property_key }}">{{ item.property_key }}</a></td>
+        <td>{{ item.original_transaction_id }}</td>
+        <td>{{ item.submitted_officer_name }}</td>
+        <td><span class="request-status request-status-{{ item.status|lower }}">{{ item.status }}</span></td>
+        <td class="text-muted">{{ item.created_at.strftime('%Y-%m-%d %H:%M') if item.created_at else '-' }}</td>
+        <td><a href="/corrections/{{ item.request_id }}" class="btn btn-xs btn-outline">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No correction requests found.</p>
+  {% if current_user.role == 'officer' %}
+  <a href="/corrections/new" class="btn btn-primary">Create First Request</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

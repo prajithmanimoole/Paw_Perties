@@ -2,6 +2,8 @@
 {% from "partials/icons.html" import house, chain, search, plus, transfer, scroll %}
 {% block title %}Dashboard &mdash; Pawperty{% endblock %}
 {% block content %}
+{% set staff_work_rows = recent_staff_work | default([], true) %}
+{% set staff_work_totals = work_totals | default([], true) %}
 <div class="page-header">
   <h1 class="page-title">Dashboard</h1>
   <p class="page-subtitle">
@@ -111,4 +113,71 @@
   </div>
   {% endif %}
 </div>
+
+{% if current_user.role == "admin" %}
+<div class="section">
+  <div class="section-header">
+    <h2 class="section-title">Staff Blockchain Work</h2>
+    <a href="/admin/users" class="btn btn-sm btn-outline">Manage Users</a>
+  </div>
+
+  {% if staff_work_totals %}
+  <div class="table-wrapper mb-md">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Role</th>
+          <th>Tracked Blocks</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in staff_work_totals %}
+        <tr>
+          <td>{{ item.username }}</td>
+          <td><span class="role-badge role-{{ item.user_role }}">{{ item.user_role }}</span></td>
+          <td class="text-center">{{ item.block_count }}</td>
+          <td><a href="/admin/users/{{ item.user_id }}/activity" class="btn btn-xs btn-ghost">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if staff_work_rows %}
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Action</th>
+          <th>Block No.</th>
+          <th>Transaction</th>
+          <th>Property</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in staff_work_rows %}
+        <tr>
+          <td>{{ item.username }}</td>
+          <td>{{ item.action_type.replace('_', ' ') }}</td>
+          <td>#{{ item.block_index }}</td>
+          <td>{{ item.transaction_id }}</td>
+          <td>{{ item.property_key }}</td>
+          <td class="text-muted">{{ item.created_at.strftime('%Y-%m-%d %H:%M:%S') if item.created_at else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>No staff blockchain work has been tracked yet.</p>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}New Correction Request &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Submit Correction Request</h1>
+  <a href="/corrections" class="btn btn-outline">Back to Requests</a>
+</div>
+
+<p class="page-subtitle">
+  Select the exact fields that need correction, then provide the corrected values for only those fields.
+</p>
+
+<div class="form-page">
+  <form action="/corrections/new" method="post" class="property-form">
+    <div class="form-section">
+      <h2 class="form-section-title">Target Transaction</h2>
+      <div class="form-grid">
+        <div class="form-group form-col-2">
+          <label class="form-label" for="property_key">Property ID</label>
+          <input id="property_key" name="property_key" class="form-input" required value="{{ form_data.property_key | default('') }}" />
+        </div>
+        <div class="form-group form-col-2">
+          <label class="form-label" for="original_transaction_id">Original Transaction ID</label>
+          <input id="original_transaction_id" name="original_transaction_id" class="form-input" required value="{{ form_data.original_transaction_id | default('') }}" placeholder="TX1023" />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h2 class="form-section-title">Error Description</h2>
+      <div class="form-group">
+        <label class="form-label" for="error_description">Description of mistake</label>
+        <textarea id="error_description" name="error_description" class="form-input form-textarea" required>{{ form_data.error_description | default('') }}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="supporting_notes">Supporting notes</label>
+        <textarea id="supporting_notes" name="supporting_notes" class="form-input form-textarea">{{ form_data.supporting_notes | default('') }}</textarea>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h2 class="form-section-title">Requested Corrections</h2>
+      <p class="text-muted">Choose each field that is wrong and enter the corrected value.</p>
+      <div class="form-grid">
+        <div class="form-group form-col-2">
+          <label class="form-label" for="select_owner_name">
+            <input id="select_owner_name" type="checkbox" name="selected_fields" value="owner_name" {{ 'checked' if 'owner_name' in form_data.selected_fields else '' }} />
+            Owner Name
+          </label>
+          <input id="corrected_owner_name" name="corrected_owner_name" class="form-input correction-input" data-field="owner_name" value="{{ form_data.corrected_owner_name | default('') }}" placeholder="Correct owner name" />
+        </div>
+
+        <div class="form-group form-col-2">
+          <label class="form-label" for="select_aadhar_no">
+            <input id="select_aadhar_no" type="checkbox" name="selected_fields" value="aadhar_no" {{ 'checked' if 'aadhar_no' in form_data.selected_fields else '' }} />
+            Aadhaar Number
+          </label>
+          <input id="corrected_aadhar_no" name="corrected_aadhar_no" class="form-input correction-input" data-field="aadhar_no" value="{{ form_data.corrected_aadhar_no | default('') }}" placeholder="123456789012" />
+        </div>
+
+        <div class="form-group form-col-2">
+          <label class="form-label" for="select_pan_no">
+            <input id="select_pan_no" type="checkbox" name="selected_fields" value="pan_no" {{ 'checked' if 'pan_no' in form_data.selected_fields else '' }} />
+            PAN Number
+          </label>
+          <input id="corrected_pan_no" name="corrected_pan_no" class="form-input correction-input" data-field="pan_no" value="{{ form_data.corrected_pan_no | default('') }}" placeholder="ABCDE1234F" />
+        </div>
+
+        <div class="form-group form-col-2">
+          <label class="form-label" for="select_address">
+            <input id="select_address" type="checkbox" name="selected_fields" value="address" {{ 'checked' if 'address' in form_data.selected_fields else '' }} />
+            Address
+          </label>
+          <input id="corrected_address" name="corrected_address" class="form-input correction-input" data-field="address" value="{{ form_data.corrected_address | default('') }}" placeholder="Correct address" />
+        </div>
+
+        <div class="form-group form-col-2">
+          <label class="form-label" for="select_pincode">
+            <input id="select_pincode" type="checkbox" name="selected_fields" value="pincode" {{ 'checked' if 'pincode' in form_data.selected_fields else '' }} />
+            Pincode
+          </label>
+          <input id="corrected_pincode" name="corrected_pincode" class="form-input correction-input" data-field="pincode" value="{{ form_data.corrected_pincode | default('') }}" placeholder="Correct pincode" />
+        </div>
+
+        <div class="form-group form-col-2">
+          <label class="form-label" for="select_value">
+            <input id="select_value" type="checkbox" name="selected_fields" value="value" {{ 'checked' if 'value' in form_data.selected_fields else '' }} />
+            Property Value
+          </label>
+          <input id="corrected_value" name="corrected_value" type="number" step="0.01" min="1" class="form-input correction-input" data-field="value" value="{{ form_data.corrected_value | default('') }}" placeholder="Correct property value" />
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <a href="/corrections" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-primary">Submit for Admin Review</button>
+    </div>
+  </form>
+</div>
+
+{% if property_history %}
+<div class="section">
+  <h2 class="section-title">Property Timeline (for selecting transaction ID)</h2>
+  {% set history = property_history %}
+  {% include "partials/history_accordion.html" %}
+</div>
+{% endif %}
+
+<script>
+  (function () {
+    const checkboxes = Array.from(document.querySelectorAll('input[name="selected_fields"]'));
+    const inputs = Array.from(document.querySelectorAll('.correction-input'));
+    function syncInputs() {
+      checkboxes.forEach((checkbox) => {
+        const input = document.querySelector('.correction-input[data-field="' + checkbox.value + '"]');
+        if (!input) return;
+        input.disabled = !checkbox.checked;
+        input.required = checkbox.checked;
+      });
+    }
+
+    function autoSelectFromInput(event) {
+      const input = event.target;
+      const field = input.getAttribute('data-field');
+      if (!field) return;
+      const checkbox = document.querySelector('input[name="selected_fields"][value="' + field + '"]');
+      if (!checkbox) return;
+
+      const hasValue = String(input.value || '').trim().length > 0;
+      if (hasValue && !checkbox.checked) {
+        checkbox.checked = true;
+        syncInputs();
+      }
+    }
+
+    checkboxes.forEach((checkbox) => checkbox.addEventListener('change', syncInputs));
+    inputs.forEach((input) => input.addEventListener('input', autoSelectFromInput));
+    syncInputs();
+  })();
+</script>
+{% endblock %}

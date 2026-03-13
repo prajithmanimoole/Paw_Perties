@@ -1,6 +1,7 @@
 <div class="property-card">
   <div class="property-card-header">
     <span class="key-badge">{{ property.property_key }}</span>
+    <span class="tx-status tx-status-{{ property.status|lower }}">{{ property.status }}</span>
     {% if property.total_transfers > 0 %}
     <span class="transfer-badge"
       >{{ property.total_transfers }} transfer{{ "s" if property.total_transfers

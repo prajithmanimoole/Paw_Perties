@@ -115,8 +115,33 @@ def require_officer(user: User = Depends(require_auth)) -> User:
 
 
 def require_officer_or_admin(user: User = Depends(require_auth)) -> User:
-    """Allow both officers and admins through."""
-    return user  # require_auth already ensured authentication
+    """Allow officers, admins, and higher authorities through."""
+    if user.role not in ("officer", "admin", "authority"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Staff access required.",
+        )
+    return user
+
+
+def require_authority(user: User = Depends(require_auth)) -> User:
+    """Ensure the authenticated user holds the *authority* role."""
+    if user.role != "authority":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Higher authority access required.",
+        )
+    return user
+
+
+def require_admin_or_authority(user: User = Depends(require_auth)) -> User:
+    """Allow admins and higher authorities through."""
+    if user.role not in ("admin", "authority"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or higher authority access required.",
+        )
+    return user
 
 
 def require_citizen(

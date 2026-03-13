@@ -836,6 +836,12 @@ img {
   border-color: var(--color-orange);
 }
 
+.role-authority {
+  background: var(--color-white);
+  color: var(--color-black);
+  border-color: var(--color-black);
+}
+
 .nav-custid {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -924,6 +930,62 @@ img {
   background: var(--color-white);
   color: var(--color-pink);
   border-color: var(--color-pink);
+}
+
+.type-correction {
+  background: var(--color-white);
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.tx-status,
+.request-status {
+  padding: 0.12rem 0.5rem;
+  border: 2px solid var(--color-black);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--color-white);
+}
+
+.tx-status-valid,
+.request-status-approved {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.tx-status-corrected,
+.request-status-rejected {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.tx-status-disputed,
+.request-status-pending_high_authority_approval {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.tx-status-revoked,
+.request-status-pending_admin_review {
+  color: var(--color-blue-dark);
+  border-color: var(--color-blue-dark);
+}
+
+.filter-panel {
+  background: var(--color-surface);
+  border: var(--border);
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1rem;
 }
 
 /* =====================================================================
@@ -1132,7 +1194,8 @@ img {
 }
 
 .history-timestamp,
-.history-block {
+.history-block,
+.history-tx {
   font-family: var(--font-mono);
   font-size: 0.75rem;
 }
@@ -1165,6 +1228,37 @@ img {
 
 .history-genesis {
   border-left: 5px solid var(--color-blue);
+}
+
+.history-correction {
+  border-left: 5px solid var(--color-error);
+}
+
+.history-correction-audit {
+  border-left: 5px solid var(--color-black);
+}
+
+.inline-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.action-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+@media (max-width: 1100px) {
+  .filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* =====================================================================
