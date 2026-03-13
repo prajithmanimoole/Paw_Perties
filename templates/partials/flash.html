@@ -1,0 +1,13 @@
+{% if flash %}
+<div
+  class="flash flash-{{ flash.category }}"
+  x-data="{ show: true }"
+  x-show="show"
+  x-transition
+>
+  <span class="flash-message">{{ flash.message }}</span>
+  <button class="flash-close" @click="show = false" aria-label="Dismiss">
+    &times;
+  </button>
+</div>
+{% endif %}

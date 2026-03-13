@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ property.property_key }} &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">{{ property.property_key }}</h1>
+    <p class="text-muted">
+      Registered on {{ property.registered_on[:10] }} &bull; Last updated {{
+      property.last_updated[:10] }}
+    </p>
+    <p>
+      <span class="tx-status tx-status-{{ property.status|lower }}">{{ property.status }}</span>
+      <span class="text-muted">Latest Tx: {{ property.last_transaction_id }}</span>
+    </p>
+  </div>
+  <div class="page-actions">
+    <a href="/transfer?key={{ property.property_key }}" class="btn btn-primary"
+      >Transfer</a
+    >
+    <a href="/inherit?key={{ property.property_key }}" class="btn btn-outline"
+      >Inherit</a
+    >
+    {% if current_user and current_user.role == 'officer' %}
+    <a href="/corrections/new?property_key={{ property.property_key }}" class="btn btn-ghost"
+      >Request Correction</a
+    >
+    {% endif %}
+  </div>
+</div>
+
+<!-- Current State -->
+<div class="detail-grid">
+  <div class="detail-section">
+    <h2 class="section-title">Ownership</h2>
+    <dl class="detail-list">
+      <dt>Current Owner</dt>
+      <dd>{{ property.owner }}</dd>
+      <dt>Customer Key</dt>
+      <dd><code>{{ property.customer_key }}</code></dd>
+      <dt>Aadhar No.</dt>
+      <dd>
+        {% if current_user and current_user.role == 'admin' %}
+          {{ property.aadhar_no }}
+        {% else %}
+          {{ property.aadhar_no[:4] }}****{{ property.aadhar_no[-4:] }}
+        {% endif %}
+      </dd>
+      <dt>PAN No.</dt>
+      <dd>
+        {% if current_user and current_user.role == 'admin' %}
+          {{ property.pan_no }}
+        {% else %}
+          {{ property.pan_no[:5] }}****
+        {% endif %}
+      </dd>
+      <dt>Total Transfers</dt>
+      <dd>{{ property.total_transfers }}</dd>
+    </dl>
+  </div>
+
+  <div class="detail-section">
+    <h2 class="section-title">Property Details</h2>
+    <dl class="detail-list">
+      <dt>Address</dt>
+      <dd>{{ property.address }}</dd>
+      <dt>Pincode</dt>
+      <dd>{{ property.pincode }}</dd>
+      <dt>Survey No.</dt>
+      <dd>{{ property.survey_no }}</dd>
+      {% if property.rtc_no %}
+      <dt>RTC No.</dt>
+      <dd>{{ property.rtc_no }}</dd>
+      {% endif %}
+      <dt>Valuation</dt>
+      <dd class="value-highlight">₹{{ "{:,.0f}".format(property.value) }}</dd>
+    </dl>
+  </div>
+
+  <div class="detail-section">
+    <h2 class="section-title">Location</h2>
+    <dl class="detail-list">
+      {% if property.location.village %}
+      <dt>Village</dt>
+      <dd>{{ property.location.village }}</dd>
+      {% endif %}
+      {% if property.location.taluk %}
+      <dt>Taluk</dt>
+      <dd>{{ property.location.taluk }}</dd>
+      {% endif %}
+      {% if property.location.district %}
+      <dt>District</dt>
+      <dd>{{ property.location.district }}</dd>
+      {% endif %}
+      {% if property.location.state %}
+      <dt>State</dt>
+      <dd>{{ property.location.state }}</dd>
+      {% endif %}
+    </dl>
+  </div>
+
+  <div class="detail-section">
+    <h2 class="section-title">Land Details</h2>
+    <dl class="detail-list">
+      {% if property.land_details.area %}
+      <dt>Area</dt>
+      <dd>{{ property.land_details.area }}</dd>
+      {% endif %}
+      {% if property.land_details.type %}
+      <dt>Type</dt>
+      <dd>{{ property.land_details.type }}</dd>
+      {% endif %}
+      {% if property.description %}
+      <dt>Description</dt>
+      <dd>{{ property.description }}</dd>
+      {% endif %}
+    </dl>
+  </div>
+</div>
+
+<!-- History accordion: fetched once via HTMX -->
+<div class="section" x-data="{ open: false }">
+  <div class="section-header">
+    <h2 class="section-title">Ownership History</h2>
+    <button
+      class="btn btn-sm btn-outline"
+      @click="open = !open"
+      hx-get="/htmx/property-history/{{ property.property_key }}"
+      hx-trigger="click once"
+      hx-target="#history-content"
+      hx-swap="innerHTML"
+      hx-indicator="#history-spinner"
+    >
+      <span x-text="open ? 'Collapse' : 'Expand History'"></span>
+    </button>
+    <span id="history-spinner" class="htmx-indicator spinner-sm">Loading…</span>
+  </div>
+
+  <div id="history-content" x-show="open" x-transition></div>
+</div>
+{% endblock %}

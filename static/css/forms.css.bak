@@ -1,0 +1,180 @@
+/* =====================================================================
+   Pawperty — Form Styles
+   ===================================================================== */
+
+/* Page wrapper */
+.form-page {
+  max-width: 860px;
+}
+.form-page-narrow {
+  max-width: 520px;
+}
+
+/* Form sections */
+.form-section {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow);
+}
+.form-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 1.1rem;
+}
+.form-section-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  margin-bottom: 0.5rem;
+}
+.form-section-toggle .form-section-title {
+  margin-bottom: 0;
+}
+.form-section-toggle:hover .form-section-title {
+  color: var(--color-accent);
+}
+
+/* Grid layout */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem 1.5rem;
+}
+.form-col-2 {
+  grid-column: span 2;
+}
+
+@media (max-width: 600px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .form-col-2 {
+    grid-column: span 1;
+  }
+}
+
+/* Form groups */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* Labels */
+.form-label {
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.required {
+  color: var(--color-error);
+  margin-left: 0.15rem;
+}
+
+/* Inputs */
+.form-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  color: var(--color-text);
+  background: var(--color-white);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+  outline: none;
+}
+.form-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 39, 68, 0.12);
+}
+.form-input[readonly] {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+.form-input::placeholder {
+  color: #aab4cc;
+}
+
+.form-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7694'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 10px 6px;
+  padding-right: 2.25rem;
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* Password toggle wrapper */
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-wrapper .form-input {
+  padding-right: 2.75rem;
+}
+.input-toggle {
+  position: absolute;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.25rem;
+  color: var(--color-text-muted);
+  transition: color 0.15s;
+}
+.input-toggle:hover {
+  color: var(--color-primary);
+}
+
+/* Inline field feedback (HTMX) */
+.field-feedback {
+  font-size: 0.78rem;
+  min-height: 1.1rem;
+}
+.feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.feedback-ok {
+  color: var(--color-success);
+}
+.feedback-error {
+  color: var(--color-error);
+}
+
+/* Form actions bar */
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}
+
+/* Property form overall */
+.property-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}

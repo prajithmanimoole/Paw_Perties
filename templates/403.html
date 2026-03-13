@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}403 Forbidden &mdash; Pawperty{% endblock %}
+{% block content %}
+<div class="error-page">
+  <div class="error-code">403</div>
+  <h1 class="error-title">Access Denied</h1>
+  <p class="error-message">
+    {{ detail | default("You don't have permission to access this page.") }}
+  </p>
+  <p class="text-muted">
+    This section requires the <strong>Admin</strong> role.
+  </p>
+  <a href="/" class="btn btn-primary">Back to Dashboard</a>
+</div>
+{% endblock %}

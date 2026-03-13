@@ -1,0 +1,23 @@
+{% from 'partials/icons.html' import check, xmark %}
+{% if is_valid %}
+<div class="chain-status chain-valid">
+  <span class="status-icon">{{ check(28) }}</span>
+  <div>
+    <strong>Blockchain is Valid</strong>
+    <p>
+      All {{ block_count }} blocks have correct SHA-256 hashes and chain links.
+    </p>
+  </div>
+</div>
+{% else %}
+<div class="chain-status chain-invalid">
+  <span class="status-icon">{{ xmark(28) }}</span>
+  <div>
+    <strong>Blockchain Integrity Failure</strong>
+    <p>
+      One or more blocks have mismatched hashes or broken chain links. Check
+      server logs for details.
+    </p>
+  </div>
+</div>
+{% endif %}

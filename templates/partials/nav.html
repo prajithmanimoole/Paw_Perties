@@ -1,0 +1,73 @@
+{% from 'partials/icons.html' import chain %}
+<nav class="navbar" x-data="{ open: false }">
+  <div class="nav-brand">
+    <a href="{% if current_citizen %}/citizen/dashboard{% else %}/{% endif %}" class="brand-link">
+      <span class="brand-icon">{{ chain(24) }}</span>
+      <span class="brand-name">Pawperty</span>
+    </a>
+  </div>
+
+  <!-- Hamburger button (mobile) -->
+  <button
+    class="nav-hamburger"
+    @click="open = !open"
+    aria-label="Toggle navigation"
+  >
+    <span></span><span></span><span></span>
+  </button>
+
+  <div class="nav-links" :class="{ 'nav-open': open }">
+    {% if current_user %}
+    <!-- Staff navigation -->
+    <a href="/" class="nav-link">Dashboard</a>
+    <a href="/properties" class="nav-link">Properties</a>
+    <a href="/users" class="nav-link">Users</a>
+    <a href="/search" class="nav-link">Search</a>
+
+    <!-- Officer + Admin: operations -->
+    <div class="nav-group">
+      <span class="nav-group-label">Operations</span>
+      <a href="/register" class="nav-link">Register</a>
+      <a href="/transfer" class="nav-link">Transfer</a>
+      <a href="/inherit" class="nav-link">Inherit</a>
+      <a href="/corrections" class="nav-link">Corrections</a>
+      {% if current_user.role == "officer" %}
+      <a href="/analytics" class="nav-link" hx-boost="false">Analytics</a>
+      {% endif %}
+    </div>
+
+    <!-- Admin-only: blockchain + user management -->
+    {% if current_user.role == "admin" %}
+    <div class="nav-group nav-group-admin">
+      <span class="nav-group-label">Admin</span>
+      <a href="/validate" class="nav-link">Validate Chain</a>
+      <a href="/blockchain" class="nav-link">Block Explorer</a>
+      <a href="/admin/users" class="nav-link">Staff Mgmt</a>
+    </div>
+    {% endif %}
+
+    <div class="nav-user">
+      <span class="role-badge role-{{ current_user.role }}"
+        >{{ current_user.role }}</span
+      >
+      <span class="nav-username">{{ current_user.username }}</span>
+      <form action="/logout" method="post" style="display: inline" hx-boost="false">
+        <button type="submit" class="btn-logout">Logout</button>
+      </form>
+    </div>
+
+    {% elif current_citizen %}
+    <!-- Citizen navigation -->
+    <a href="/citizen/dashboard" class="nav-link">My Properties</a>
+
+    <div class="nav-user">
+      <span class="role-badge role-citizen">citizen</span>
+      <span class="nav-username">{{ current_citizen.name }}</span>
+      <span class="nav-custid">{{ current_citizen.customer_key }}</span>
+      <form action="/citizen/logout" method="post" style="display: inline" hx-boost="false">
+        <button type="submit" class="btn-logout">Logout</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</nav>

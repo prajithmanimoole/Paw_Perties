@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% from "partials/icons.html" import house, chain, search, plus, transfer, scroll %}
+{% block title %}Dashboard &mdash; Pawperty{% endblock %}
+{% block content %}
+{% set staff_work_rows = recent_staff_work | default([], true) %}
+{% set staff_work_totals = work_totals | default([], true) %}
+<div class="page-header">
+  <h1 class="page-title">Dashboard</h1>
+  <p class="page-subtitle">
+    Property Ledger Blockchain &mdash; Indian Standards
+  </p>
+</div>
+
+<!-- Stat cards -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-icon">{{ house(32) }}</div>
+    <div class="stat-body">
+      <div class="stat-number">{{ property_count }}</div>
+      <div class="stat-label">Registered Properties</div>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon">{{ chain(32) }}</div>
+    <div class="stat-body">
+      <div class="stat-number">{{ block_count }}</div>
+      <div class="stat-label">Blocks in Chain</div>
+    </div>
+  </div>
+
+  {% if current_user.role == "admin" %}
+  <div class="stat-card stat-card-action">
+    <div class="stat-icon">{{ search(32) }}</div>
+    <div class="stat-body">
+      <div class="stat-label">Chain Integrity</div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Quick actions -->
+<div class="section">
+  <h2 class="section-title">Quick Actions</h2>
+  <div class="action-grid">
+    <a href="/register" class="action-card">
+      <span class="action-icon">{{ plus(28) }}</span>
+      <span class="action-label">Register Property</span>
+    </a>
+    <a href="/transfer" class="action-card">
+      <span class="action-icon">{{ transfer(28) }}</span>
+      <span class="action-label">Transfer Property</span>
+    </a>
+    <a href="/inherit" class="action-card">
+      <span class="action-icon">{{ scroll(28) }}</span>
+      <span class="action-label">Inherit Property</span>
+    </a>
+    <a href="/search" class="action-card">
+      <span class="action-icon">{{ search(28) }}</span>
+      <span class="action-label">Search by Owner</span>
+    </a>
+  </div>
+</div>
+
+<!-- Recent properties -->
+<div class="section">
+  <div class="section-header">
+    <h2 class="section-title">Recent Properties</h2>
+    <a href="/properties" class="btn btn-sm btn-outline">View All</a>
+  </div>
+
+  {% if recent_properties %}
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Property Key</th>
+          <th>Owner</th>
+          <th>Address</th>
+          <th>Survey No</th>
+          <th>Value (₹)</th>
+          <th>Transfers</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for prop in recent_properties %}
+        <tr>
+          <td><span class="key-badge">{{ prop.property_key }}</span></td>
+          <td>{{ prop.owner }}</td>
+          <td class="text-muted">
+            {{ prop.address[:40] }}{% if prop.address|length > 40 %}…{% endif %}
+          </td>
+          <td>{{ prop.survey_no }}</td>
+          <td class="text-center">{{"{:,.0f}".format(prop.value)}}</td>
+          <td class="text-center">{{ prop.total_transfers }}</td>
+          <td>
+            <a
+              href="/properties/{{ prop.property_key }}"
+              class="btn btn-xs btn-ghost"
+              >View →</a
+            >
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>No properties registered yet.</p>
+    <a href="/register" class="btn btn-primary">Register First Property</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if current_user.role == "admin" %}
+<div class="section">
+  <div class="section-header">
+    <h2 class="section-title">Staff Blockchain Work</h2>
+    <a href="/admin/users" class="btn btn-sm btn-outline">Manage Users</a>
+  </div>
+
+  {% if staff_work_totals %}
+  <div class="table-wrapper mb-md">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Role</th>
+          <th>Tracked Blocks</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in staff_work_totals %}
+        <tr>
+          <td>{{ item.username }}</td>
+          <td><span class="role-badge role-{{ item.user_role }}">{{ item.user_role }}</span></td>
+          <td class="text-center">{{ item.block_count }}</td>
+          <td><a href="/admin/users/{{ item.user_id }}/activity" class="btn btn-xs btn-ghost">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if staff_work_rows %}
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Action</th>
+          <th>Block No.</th>
+          <th>Transaction</th>
+          <th>Property</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in staff_work_rows %}
+        <tr>
+          <td>{{ item.username }}</td>
+          <td>{{ item.action_type.replace('_', ' ') }}</td>
+          <td>#{{ item.block_index }}</td>
+          <td>{{ item.transaction_id }}</td>
+          <td>{{ item.property_key }}</td>
+          <td class="text-muted">{{ item.created_at.strftime('%Y-%m-%d %H:%M:%S') if item.created_at else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>No staff blockchain work has been tracked yet.</p>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
